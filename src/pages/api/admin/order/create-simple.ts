@@ -44,15 +44,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "Missing required fields" });
     }
     
-    // Validate ticket structure
+    // Validate ticket structure (use eventTicketTypeId - Category deprecated)
     for (const ticket of tickets) {
       // Quantity: prefer explicit 'quantity', then legacy 'amount', default 1
       const qtyRaw = (ticket.quantity ?? ticket.amount ?? 1);
       const quantity = Number.isFinite(Number(qtyRaw)) ? Number(qtyRaw) : 1;
 
-      if (!ticket.categoryId) {
-        console.error(`[admin/order/create-simple] ❌ Invalid ticket data (missing categoryId):`, ticket);
-        return res.status(400).json({ error: "Invalid ticket data", details: "Missing categoryId" });
+      if (!ticket.eventTicketTypeId) {
+        console.error(`[admin/order/create-simple] ❌ Invalid ticket data (missing eventTicketTypeId):`, ticket);
+        return res.status(400).json({ error: "Invalid ticket data", details: "Missing eventTicketTypeId" });
       }
       if (quantity <= 0) {
         console.error(`[admin/order/create-simple] ❌ Invalid ticket quantity:`, ticket);
@@ -146,12 +146,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     });
 
-    // Create tickets
+    // Create tickets (use eventTicketTypeId - Category deprecated)
     for (const ticket of tickets) {
       await prisma.ticket.create({
         data: {
           orderId: order.id,
-          categoryId: ticket.categoryId,
+          eventTicketTypeId: ticket.eventTicketTypeId,
           amount: ticket.quantity || ticket.amount || 1, // Use quantity from frontend
           secret: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
         }
@@ -166,16 +166,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const eventName = eventDate.event?.title || 'Event';
         const eventDateStr = eventDate.date.toISOString();
         
-            // Get ticket category names and prices
+            // Get ticket type names and prices (use EventTicketType - Category deprecated)
     console.log(`[admin/order/create-simple] 🔍 Processing ${tickets.length} tickets:`, JSON.stringify(tickets, null, 2));
     
     const ticketDetails = await Promise.all(tickets.map(async (ticket) => {
-      const category = await prisma.category.findUnique({
-        where: { id: ticket.categoryId }
+      const ticketType = await prisma.eventTicketType.findUnique({
+        where: { id: ticket.eventTicketTypeId }
       });
       
       // Handle the frontend data structure correctly
-      // Frontend sends: { categoryId: 19, quantity: 1, price: 3 }
+      // Frontend sends: { eventTicketTypeId: 19, quantity: 1, price: 3 }
       // This means: 1 ticket at £3 each
       let ticketQuantity, ticketPrice;
       
@@ -189,16 +189,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ticketPrice = Math.round(priceNum * 100);
         console.log(`[admin/order/create-simple] 🔍 Using frontend price: ${priceNum} pounds (${ticketPrice} pence) for ${ticketQuantity} ticket(s)`);
       } else {
-        // Category price is already in pence
-        ticketPrice = category?.price ?? 0;
-        console.log(`[admin/order/create-simple] 🔍 No/invalid frontend price, using category price: ${ticketPrice} pence (£${(ticketPrice/100).toFixed(2)}) for ${ticketQuantity} ticket(s)`);
+        // EventTicketType price is already in pence
+        ticketPrice = ticketType?.price ?? 0;
+        console.log(`[admin/order/create-simple] 🔍 No/invalid frontend price, using ticket type price: ${ticketPrice} pence (£${(ticketPrice/100).toFixed(2)}) for ${ticketQuantity} ticket(s)`);
       }
       
       const ticketDetail = {
-        categoryId: ticket.categoryId,
+        ticketTypeId: ticket.eventTicketTypeId,
         amount: ticketQuantity, // This will be used as quantity in Stripe
-        price: ticketPrice, // Use category price
-        name: category?.label || 'Ticket'
+        price: ticketPrice, // Use ticket type price
+        name: ticketType?.name || 'Ticket'
       };
       console.log(`[admin/order/create-simple] 🔍 Ticket detail:`, ticketDetail);
       return ticketDetail;

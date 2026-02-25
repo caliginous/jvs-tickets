@@ -28,8 +28,7 @@ export default async function handler(
                 shipping: true,
                 tickets: {
                     select: {
-                        categoryId: true,
-                        seatId: true,
+                        eventTicketTypeId: true,
                         amount: true
                     }
                 }

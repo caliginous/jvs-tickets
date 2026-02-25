@@ -11,9 +11,10 @@ interface TicketType {
   price: number;
   currency: string;
   capacity?: number;
-  sold: number;
-  isActive: boolean;
-  isPublic: boolean;
+  sold: number; // Computed from Ticket rows, not DB column
+  available: number; // Computed availability
+  isSoldOut: boolean;
+  isAvailable: boolean;
   publicSortOrder: number;
   colorHex?: string;
 }
@@ -44,29 +45,35 @@ export default function TicketPicker({ eventId, eventDateId, eventSlug, onChecko
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`/api/public/events/${eventId}/ticket-types`);
+      const url = eventDateId 
+        ? `/api/public/events/${eventId}/ticket-types?eventDateId=${eventDateId}`
+        : `/api/public/events/${eventId}/ticket-types`;
+      
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to load ticket types');
       }
       
       const data = await response.json();
-      setTicketTypes(data);
+      // API returns { eventDateId, ticketTypes: [...], ... }
+      setTicketTypes(data.ticketTypes || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load ticket types');
     } finally {
       setLoading(false);
     }
-  }, [eventId]);
+  }, [eventId, eventDateId]);
 
   useEffect(() => {
     loadTicketTypes();
-  }, [eventId, loadTicketTypes]);
+  }, [loadTicketTypes]);
 
   const getAvailableQuantity = (ticketType: TicketType) => {
-    if (ticketType.capacity === null || ticketType.capacity === undefined) {
+    // Use pre-computed availability from the API
+    if (ticketType.available === null || ticketType.available === undefined) {
       return Infinity;
     }
-    return Math.max(0, ticketType.capacity - ticketType.sold);
+    return ticketType.available;
   };
 
   const getAvailabilityText = (ticketType: TicketType) => {
@@ -178,7 +185,7 @@ export default function TicketPicker({ eventId, eventDateId, eventSlug, onChecko
 
       // Store tickets in Redux for the booking workflow
       const ticketsForRedux = cart.map(item => ({
-        categoryId: item.ticketTypeId, // Map ticket type ID to category ID
+        ticketTypeId: item.ticketTypeId,
         amount: item.quantity,
         price: item.ticketType.price
       }));
@@ -224,9 +231,8 @@ export default function TicketPicker({ eventId, eventDateId, eventSlug, onChecko
     );
   }
 
-  const activeTicketTypes = ticketTypes
-    ?.filter(tt => tt.isActive && tt.isPublic)
-    ?.sort((a, b) => a.publicSortOrder - b.publicSortOrder) || [];
+  // API already filters for active/public and sorts by publicSortOrder
+  const activeTicketTypes = ticketTypes || [];
 
   if (activeTicketTypes.length === 0) {
     return (

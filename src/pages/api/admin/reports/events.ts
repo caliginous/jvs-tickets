@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { serverAuthenticate } from '../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../constants/interfaces';
 import prisma from '../../../../lib/prisma';
+import { CAPACITY_RESERVED_STATUSES_ARRAY, reservesCapacity } from '../../../../constants/orderStatuses';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'GET') {
@@ -17,7 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         
         if (!sessionUser) return;
 
-        // Fetch events with their dates, categories, and order data
+        // Fetch events with their dates and order data
         // Include both active and inactive events, confirmed orders only
         const events = await prisma.event.findMany({
             include: {
@@ -25,22 +26,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     include: {
                         orders: {
                             where: {
-                                status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED'] }
+                                status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
                             },
                             include: {
                                 tickets: {
                                     include: {
-                                        category: true,
                                         eventTicketType: true
                                     }
                                 }
                             }
                         }
-                    }
-                },
-                categories: {
-                    include: {
-                        category: true
                     }
                 },
                 ticketTypes: {
@@ -63,9 +58,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
             event.dates.forEach(date => {
                 date.orders.forEach(order => {
-                    // Only count confirmed/paid orders (exclude PENDING, EXPIRED, CANCELLED, fully REFUNDED)
-                    // Include PARTIALLY_REFUNDED as these customers still have valid tickets
-                    if (['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED'].includes(order.status)) {
+                    // Only count capacity-reserved orders (CONFIRMED, PAID, COMPLETED, PARTIALLY_REFUNDED)
+                    if (reservesCapacity(order.status)) {
                         totalOrders++;
                         
                         // Count tickets sold
@@ -107,14 +101,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     date: date.date,
                     totalTicketLimit: date.totalTicketLimit
                 })),
-                categories: event.categories
-                    .filter(categoryOnEvent => categoryOnEvent.category) // Filter out null categories
-                    .map(categoryOnEvent => ({
-                        id: categoryOnEvent.category.id,
-                        name: categoryOnEvent.category.label,
-                        price: categoryOnEvent.category.price,
-                        maxAmount: categoryOnEvent.maxAmount
-                    })),
                 ticketTypes: event.ticketTypes.map(ticketType => ({
                     id: ticketType.id,
                     name: ticketType.name,

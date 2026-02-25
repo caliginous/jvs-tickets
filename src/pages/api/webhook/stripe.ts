@@ -451,26 +451,10 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                             });
                             
                             if (existingTickets.length > 0) {
-                                // Tickets already exist from PENDING order, just increment sold counter
+                                // Tickets already exist from PENDING order - availability is computed from Ticket rows
+                                // NOTE: EventTicketType.sold is deprecated and no longer updated.
+                                // Availability is computed dynamically via availability service.
                                 console.log(`[webhook/stripe] Order ${order.id} already has ${existingTickets.length} tickets (from PENDING order)`);
-                                
-                                // Group tickets by eventTicketTypeId and increment sold counter for each
-                                const ticketTypeCounts: Record<number, number> = {};
-                                existingTickets.forEach(ticket => {
-                                    if (ticket.eventTicketTypeId) {
-                                        ticketTypeCounts[ticket.eventTicketTypeId] = (ticketTypeCounts[ticket.eventTicketTypeId] || 0) + 1;
-                                    }
-                                });
-                                
-                                for (const ticketTypeId of Object.keys(ticketTypeCounts)) {
-                                    const count = ticketTypeCounts[parseInt(ticketTypeId)];
-                                    await prisma.eventTicketType.update({
-                                        where: { id: parseInt(ticketTypeId) },
-                                        data: { sold: { increment: count } }
-                                    });
-                                    console.log(`[webhook/stripe] Incremented sold count for ticket type ${ticketTypeId} by ${count}`);
-                                }
-                                
                                 console.log(`[webhook/stripe] ✅ Confirmed ${existingTickets.length} tickets for order ${order.id}`);
                             } else {
                                 // No tickets yet, create them (backward compatibility for old orders)
@@ -483,7 +467,15 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                                     console.log(`[webhook/stripe] Creating tickets for order ${order.id} with ${orderItems.length} items (legacy order)`);
                                     
                                     // Create tickets for each order item
+                                    // NOTE: EventTicketType.sold is deprecated and no longer updated.
+                                    // Availability is computed dynamically from Ticket rows via availability service.
                                     for (const item of orderItems) {
+                                        // Guard: eventTicketTypeId is required for Phase 3 compatibility
+                                        if (!item.eventTicketTypeId) {
+                                            console.error(`[webhook/stripe] ❌ OrderItem ${item.id} is missing eventTicketTypeId - cannot create ticket`);
+                                            continue;
+                                        }
+                                        
                                         for (let i = 0; i < item.quantity; i++) {
                                             await prisma.ticket.create({
                                                 data: {
@@ -498,14 +490,6 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                                                 }
                                             });
                                         }
-                                        
-                                        // Update sold count for the ticket type
-                                        await prisma.eventTicketType.update({
-                                            where: { id: item.eventTicketTypeId },
-                                            data: {
-                                                sold: { increment: item.quantity }
-                                            }
-                                        });
                                     }
                                     
                                     console.log(`[webhook/stripe] ✅ Created ${orderItems.reduce((sum, item) => sum + item.quantity, 0)} tickets for order ${order.id}`);
@@ -626,36 +610,26 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                 
                 console.log(`[webhook/stripe] ✅ Created new order ${order.id} from Stripe metadata`);
                 
-                // Create tickets - handle both legacy Categories and new EventTicketTypes
+                // Create tickets using eventTicketTypeId from metadata
                 for (const ticket of tickets) {
-                    // Check if the categoryId is actually an EventTicketType
-                    const eventTicketType = await prisma.eventTicketType.findUnique({
-                        where: { id: ticket.categoryId }
-                    });
+                    const eventTicketTypeId = ticket.ticketTypeId || ticket.eventTicketTypeId;
                     
-                    if (eventTicketType) {
-                        // This is a new-style EventTicketType event
-                        console.log(`[webhook/stripe] Creating ticket with EventTicketType ${ticket.categoryId}`);
-                        await prisma.ticket.create({
-                            data: {
-                                orderId: order.id,
-                                eventTicketTypeId: ticket.categoryId,
-                                amount: ticket.amount,
-                                secret: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
-                            }
-                        });
-                    } else {
-                        // This is a legacy Category-based event
-                        console.log(`[webhook/stripe] Creating ticket with Category ${ticket.categoryId}`);
-                        await prisma.ticket.create({
-                            data: {
-                                orderId: order.id,
-                                categoryId: ticket.categoryId,
-                                amount: ticket.amount,
-                                secret: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
-                            }
-                        });
+                    // Guard: eventTicketTypeId is required for Phase 3 compatibility
+                    if (!eventTicketTypeId) {
+                        console.error(`[webhook/stripe] ❌ Ticket metadata is missing ticketTypeId/eventTicketTypeId for order ${order.id} - cannot create ticket`);
+                        console.error(`[webhook/stripe] Ticket data:`, JSON.stringify(ticket));
+                        continue;
                     }
+                    
+                    console.log(`[webhook/stripe] Creating ticket with EventTicketType ${eventTicketTypeId}`);
+                    await prisma.ticket.create({
+                        data: {
+                            orderId: order.id,
+                            eventTicketTypeId,
+                            amount: ticket.amount,
+                            secret: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+                        }
+                    });
                 }
                 
                 console.log(`[webhook/stripe] ✅ Created ${tickets.length} tickets for order ${order.id}`);

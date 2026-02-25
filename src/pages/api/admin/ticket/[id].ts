@@ -9,7 +9,7 @@ export default async function handler(
     res: NextApiResponse
 ) {
     const user = await serverAuthenticate(req, res, {
-        permission: PermissionSection.EventSeatMaps,
+        permission: PermissionSection.TicketManagement,
         permissionType:
             req.method === "GET" ? PermissionType.Read : PermissionType.Write
     });

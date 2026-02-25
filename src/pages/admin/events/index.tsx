@@ -13,8 +13,6 @@ import { Button, toast } from "../../../ui";
 
 export default function Events({
     events,
-    seatmaps,
-    categories,
     venues,
     permissionDenied,
     currency
@@ -136,9 +134,7 @@ export default function Events({
                     setEvent(null)
                     setAddEventOpen(false)
                 }}
-                seatmaps={seatmaps}
                 onChange={refreshProps}
-                categories={categories}
                 venues={venues}
                 currency={currency}
             />
@@ -270,12 +266,7 @@ export async function getServerSideProps(context) {
                             },
                         }
                     },
-                    customFields: true,
-                    categories: {
-                        include: {
-                            category: true
-                        }
-                    }
+                    customFields: true
                 }
             });
 
@@ -313,9 +304,6 @@ export async function getServerSideProps(context) {
                 return dateB.getTime() - dateA.getTime();
             });
 
-            const seatmaps = (await prisma.seatMap.findMany())
-                .map(seatmap => ({...seatmap, preview: null, containsPreview: seatmap.preview !== null}));
-            const categories = await prisma.category.findMany();
             const venues = await (prisma as any).venue.findMany({
                 where: { isActive: true },
                 orderBy: { name: 'asc' }
@@ -324,8 +312,6 @@ export async function getServerSideProps(context) {
             return {
                 props: {
                     events: serializableEvents,
-                    seatmaps,
-                    categories,
                     venues,
                     currency: await getOption(Options.Currency)
                 }

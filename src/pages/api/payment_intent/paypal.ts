@@ -2,7 +2,7 @@ import { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../../lib/prisma";
 import { paypalClient } from "../../../lib/paypal";
 import paypal from "@paypal/checkout-server-sdk";
-import { calculateTotalPrice, getSeatMap, validateCategoriesWithSeatMap, DatabaseTicket } from "../../../constants/util";
+import { getServiceFeeAmount } from "../../../constants/util";
 import { withNotification } from "../../../lib/notifications/withNotification";
 import { OrderState } from "../../../store/reducers/orderReducer";
 import { PaymentType } from "../../../store/factories/payment/PaymentFactory";
@@ -27,7 +27,6 @@ async function handler(
             throw new Error("Invalid ticket amount");
         }
 
-        const categories = await prisma.category.findMany();
         const orderDB = await prisma.order.findUnique({
             where: {
                 id: order.orderId
@@ -35,15 +34,14 @@ async function handler(
             select: {
                 eventDate: {
                     select: {
-                        event: {
-                            select: {
-                                seatType: true,
-                                seatMap: true
-                            }
-                        }
+                        event: true
                     }
                 },
-                tickets: true,
+                tickets: {
+                    include: {
+                        eventTicketType: true
+                    }
+                },
                 paymentIntent: true,
                 paymentType: true,
                 shipping: true
@@ -54,14 +52,17 @@ async function handler(
             return res.status(200).json({ orderId: JSON.parse(orderDB.paymentIntent).id });
         }
 
-        let amount = calculateTotalPrice(
-            validateCategoriesWithSeatMap(orderDB.tickets, getSeatMap(orderDB.eventDate.event)),
-            categories,
-            await getOption(Options.PaymentFeesShipping),
-            await getOption(Options.PaymentFeesPayment),
-            JSON.parse(orderDB.shipping).type,
-            orderDB.paymentType
-        );
+        const shippingFees = await getOption(Options.PaymentFeesShipping);
+        const paymentFees = await getOption(Options.PaymentFeesPayment);
+        let shippingType: string | null = null;
+        try {
+            shippingType = JSON.parse(orderDB.shipping).type;
+        } catch { /* ignore */ }
+        const ticketTotal = orderDB.tickets.reduce((sum: number, t: any) => {
+            const price = t.eventTicketType?.price ?? 0;
+            return sum + (t.amount * price);
+        }, 0);
+        const amount = ticketTotal + getServiceFeeAmount(shippingFees, shippingType) + getServiceFeeAmount(paymentFees, orderDB.paymentType);
         const currency = await getOption(Options.Currency);
 
         let request = new paypal.orders.OrdersCreateRequest();

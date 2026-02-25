@@ -93,27 +93,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         eventId: parseInt(eventId),
         isActive: true
       },
-      select: { id: true, name: true, capacity: true, sold: true, price: true }
+      select: { id: true, name: true, capacity: true, price: true }
     });
 
     if (ticketTypes.length !== ticketTypeIds.length) {
       return res.status(400).json({ error: 'One or more ticket types not found or inactive' });
     }
 
-    // Check capacity for each ticket type
-    for (const item of items) {
-      const ticketType = ticketTypes.find(tt => tt.id === item.eventTicketTypeId);
-      if (!ticketType) continue;
-
-      if (ticketType.capacity !== null) {
-        const available = ticketType.capacity - ticketType.sold;
-        if (item.quantity > available) {
-          return res.status(400).json({
-            error: `Insufficient capacity for ${ticketType.name}. Requested: ${item.quantity}, Available: ${available}`
-          });
-        }
-      }
-    }
+    // NOTE: Capacity check is now performed inside createOrderWithEventTicketTypes
+    // using checkCapacityForOrder from the availability service
 
     // Create order using the service with server-side price validation
     const result = await createOrderWithEventTicketTypes({
@@ -182,7 +170,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const itemPrice = item.priceOverride != null ? item.priceOverride : (ticketType?.price || 0); // priceOverride already in pence from line 129, ticketType.price also in pence
           
           return {
-            categoryId: item.eventTicketTypeId,
+            ticketTypeId: item.eventTicketTypeId,
             amount: item.quantity,
             price: itemPrice, // Use the actual price from request/ticket type
             name: ticketType?.name || 'Ticket'

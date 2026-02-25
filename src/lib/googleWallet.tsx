@@ -48,7 +48,7 @@ const getPayload = (eventDate, ticket) => {
                 "defaultValue": {
                     "kind": "walletobjects#string",
                     "language": "en-us",
-                    "value": ticket.seatId?.toString() ?? ticket.category.label
+                    "value": ticket.eventTicketType?.name ?? 'General Admission'
                 }
             }
         },

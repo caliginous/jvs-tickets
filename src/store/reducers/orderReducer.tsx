@@ -10,10 +10,9 @@ export interface OrderState {
 }
 
 export interface Ticket {
-    seatId?: number;
-    categoryId: number;
+    ticketTypeId: number;
     amount: number;
-    price: number; // Added price property for validation
+    price: number;
     firstName?: string;
     lastName?: string;
 }

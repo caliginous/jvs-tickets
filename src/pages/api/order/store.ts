@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import { withNotification } from "../../../lib/notifications/withNotification";
-import { validateOrder } from "../../../constants/serverUtil";
+import { validateOrderNew } from "../../../constants/serverUtil";
 import { OrderState } from "../../../store/reducers/orderReducer";
 import { PersonalInformationState } from "../../../store/reducers/personalInformationReducer";
 import { PaymentType } from "../../../store/factories/payment/PaymentFactory";
@@ -109,7 +109,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     console.log('Invalid tickets:', invalidTickets.length);
     if (invalidTickets.length > 0) {
       console.log('Invalid ticket reasons:', invalidTickets.map(t => ({ 
-        categoryId: t.categoryId, 
+        eventTicketTypeId: t.eventTicketTypeId, 
         reasons: t.reasons 
       })));
     }
@@ -136,7 +136,13 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     let validationErrors: any[] = [];
     
     if (!skipValidation) {
-      [isValid, validationErrors] = await validateOrder(validTickets, eventDateId, reservationId, true, true);
+      const result = await validateOrderNew(
+        validTickets.map(t => ({ eventTicketTypeId: t.eventTicketTypeId, quantity: t.amount })),
+        eventDateId,
+        true
+      );
+      isValid = result.success;
+      validationErrors = result.success ? [] : [result.error || 'Validation failed'];
     } else {
       console.log('=== SKIPPING ORDER VALIDATION FOR STRIPE PAYMENT ===');
       console.log('Order validation bypassed to prevent failed charges');
@@ -149,7 +155,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
         error: 'Order validation failed',
         details: validationErrors,
         validTickets: [],
-        invalidTickets: validTickets.map(t => ({ ...t, reasons: ['ORDER_VALIDATION_FAILED'] }))
+        invalidTickets: validTickets.map(t => ({ ...t, reasons: ['ORDER_VALIDATION_FAILED'] as string[] }))
       });
     }
 
@@ -273,7 +279,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       await prisma.ticket.create({
         data: {
           orderId: createdOrder.id,
-          categoryId: ticket.categoryId,
+          eventTicketTypeId: ticket.eventTicketTypeId,
           amount: ticket.amount,
           firstName: ticket.firstName || null,
           lastName: ticket.lastName || null,

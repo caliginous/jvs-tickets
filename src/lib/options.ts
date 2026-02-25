@@ -49,7 +49,7 @@ const updateNecessaryPages = async (key: Options, res?: NextApiResponse) => {
             break;
         case Options.Theme:
             const events = await prisma.event.findMany();
-            const eventPaths = events.map(event => `/seatselection/${event.id}`);
+            const eventPaths = events.map(event => `/booking/${event.id}`);
             await revalidateBuild(res, eventPaths.concat(["/information", "/payment", "/checkout"]))
             break;
         case Options.PaymentFeesShipping:

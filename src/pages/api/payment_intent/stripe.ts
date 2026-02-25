@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import prisma from "../../../lib/prisma";
-import { calculateTotalPrice, getSeatMap, validateCategoriesWithSeatMap, DatabaseTicket } from "../../../constants/util";
+import { getServiceFeeAmount } from "../../../constants/util";
 import { withNotification } from "../../../lib/notifications/withNotification";
 import { OrderState } from "../../../store/reducers/orderReducer";
 import { PaymentType } from "../../../store/factories/payment/PaymentFactory";
@@ -106,19 +106,18 @@ async function handler(
                 });
             }
 
-            // Fetch order from database
+            // Fetch order from database (include eventTicketType for pricing - Category deprecated)
             orderDB = await prisma.order.findUnique({
                 where: { id: order.orderId },
                 select: {
-                    tickets: true,
+                    tickets: {
+                        include: {
+                            eventTicketType: true
+                        }
+                    },
                     eventDate: {
                         select: {
-                            event: {
-                                select: {
-                                    seatType: true,
-                                    seatMap: true
-                                }
-                            }
+                            event: true
                         }
                     },
                     idempotencyKey: true,
@@ -141,22 +140,18 @@ async function handler(
                 return res.status(200).json(JSON.parse(orderDB.paymentIntent));
             }
 
-            // Calculate amount and validate
-            const categories = await prisma.category.findMany();
-            amount = calculateTotalPrice(
-                validateCategoriesWithSeatMap(orderDB.tickets, getSeatMap(orderDB.eventDate?.event)),
-                categories,
-                await getOption(Options.PaymentFeesShipping),
-                await getOption(Options.PaymentFeesPayment),
-                (() => { 
-                    try { 
-                        return JSON.parse(orderDB.shipping).type; 
-                    } catch { 
-                        return null; 
-                    } 
-                })(),
-                orderDB.paymentType
-            );
+            // Calculate amount from tickets (use eventTicketType - Category deprecated)
+            const shippingFees = await getOption(Options.PaymentFeesShipping);
+            const paymentFees = await getOption(Options.PaymentFeesPayment);
+            let shippingType: string | null = null;
+            try {
+                shippingType = JSON.parse(orderDB.shipping).type;
+            } catch { /* ignore */ }
+            const ticketTotal = orderDB.tickets.reduce((sum: number, t: any) => {
+                const price = t.eventTicketType?.price ?? 0;
+                return sum + (t.amount * price);
+            }, 0);
+            amount = ticketTotal + getServiceFeeAmount(shippingFees, shippingType) + getServiceFeeAmount(paymentFees, orderDB.paymentType);
             
             // Apply discount if present
             if (discountInfo && discountInfo.discountAmount && discountInfo.discountAmount > 0) {

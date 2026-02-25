@@ -80,7 +80,7 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
         body: JSON.stringify({
           code: discountCode.trim(),
           eventId: eventDateId,
-          categoryIds: order.tickets.map(t => t.categoryId),
+          ticketTypeIds: order.tickets.map(t => t.ticketTypeId),
           orderTotal: originalTotal
         })
       });
@@ -176,7 +176,7 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
           {order.tickets.map((ticket, index) => (
             <div key={index} className="flex justify-between text-sm">
               <span className="text-neutral-600">
-                {ticket.amount || 1} × {(ticket as any).categoryName || 'Ticket'}
+                {ticket.amount || 1} × {(ticket as any).ticketTypeName || (ticket as any).name || 'Ticket'}
               </span>
               <span className="text-neutral-900">£{(((ticket as any).price || 0) * (ticket.amount || 1)).toFixed(2)}</span>
             </div>

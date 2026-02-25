@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../lib/prisma';
+import { computeAvailability } from '../../../../../lib/services/ticketing/availability';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'GET') {
@@ -14,58 +15,80 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(400).json({ error: 'Invalid event ID' });
         }
 
-        // Fetch active and public ticket types for the event
-        const ticketTypes = await prisma.eventTicketType.findMany({
-            where: {
-                eventId: eventIdNum,
-                isActive: true,
-                isPublic: true
-            },
+        // Find the event and its dates
+        const event = await prisma.event.findUnique({
+            where: { id: eventIdNum },
             select: {
                 id: true,
-                name: true,
-                description: true,
-                price: true,
-                currency: true,
-                capacity: true,
-                sold: true,
                 isActive: true,
-                isPublic: true,
-                publicSortOrder: true,
-                colorHex: true
-            },
-            orderBy: [
-                { publicSortOrder: 'asc' },
-                { name: 'asc' }
-            ]
+                dates: {
+                    orderBy: { date: 'asc' },
+                    select: { id: true, date: true }
+                },
+                ticketTypes: {
+                    where: { isActive: true, isPublic: true },
+                    select: {
+                        id: true,
+                        description: true,
+                        publicSortOrder: true,
+                        colorHex: true
+                    }
+                }
+            }
         });
 
-        // Calculate availability for each ticket type
-        const ticketTypesWithAvailability = ticketTypes.map(type => {
-            const available = type.capacity === null 
-                ? 999999 // Large number for unlimited capacity
-                : Math.max(type.capacity - type.sold, 0);
+        if (!event || !event.isActive) {
+            return res.status(404).json({ error: 'Event not found or inactive' });
+        }
 
+        // Determine which eventDateId to use
+        let targetDateId: number;
+        if (eventDateId && typeof eventDateId === 'string') {
+            targetDateId = parseInt(eventDateId);
+            if (isNaN(targetDateId)) {
+                return res.status(400).json({ error: 'Invalid eventDateId' });
+            }
+        } else {
+            // Default to the next upcoming date, or the first date if all past
+            const now = new Date();
+            const futureDate = event.dates.find(d => d.date && new Date(d.date) > now);
+            const targetDate = futureDate || event.dates[0];
+            
+            if (!targetDate) {
+                return res.status(404).json({ error: 'No event dates found' });
+            }
+            targetDateId = targetDate.id;
+        }
+
+        // Get computed availability from the canonical service
+        const availability = await computeAvailability(targetDateId);
+
+        // Enrich with additional ticket type info and filter for public display
+        const ticketTypesWithAvailability = availability.ticketTypes.map(tt => {
+            const extraInfo = event.ticketTypes.find(t => t.id === tt.eventTicketTypeId);
             return {
-                id: type.id,
-                name: type.name,
-                description: type.description,
-                price: type.price,
-                currency: type.currency,
-                capacity: type.capacity,
-                sold: type.sold,
-                available,
-                isActive: type.isActive,
-                isPublic: type.isPublic,
-                publicSortOrder: type.publicSortOrder,
-                colorHex: type.colorHex
+                id: tt.eventTicketTypeId,
+                name: tt.name,
+                description: extraInfo?.description || null,
+                price: tt.price,
+                currency: tt.currency,
+                capacity: tt.capacity,
+                sold: tt.sold, // Computed from Ticket rows, not DB column
+                available: tt.available ?? 999999,
+                isSoldOut: tt.isSoldOut,
+                isAvailable: !tt.isSoldOut,
+                publicSortOrder: extraInfo?.publicSortOrder ?? 0,
+                colorHex: extraInfo?.colorHex || null
             };
+        }).sort((a, b) => a.publicSortOrder - b.publicSortOrder);
+
+        return res.status(200).json({
+            eventDateId: availability.eventDateId,
+            globalRemaining: availability.globalRemaining,
+            totalSold: availability.totalSold,
+            totalLimit: availability.totalLimit,
+            ticketTypes: ticketTypesWithAvailability
         });
-
-        // Filter out sold-out types (optional - you might want to show them as disabled)
-        const availableTicketTypes = ticketTypesWithAvailability.filter(type => type.available > 0);
-
-        return res.status(200).json(availableTicketTypes);
 
     } catch (error) {
         console.error('Error fetching public ticket types:', error);

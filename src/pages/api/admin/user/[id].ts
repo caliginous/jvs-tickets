@@ -26,7 +26,7 @@ export default async function handler(
     });
 
     if (!adminUser) {
-        res.status(404).end("Category not found");
+        res.status(404).end("Admin user not found");
         return;
     }
 

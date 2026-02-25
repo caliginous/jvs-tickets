@@ -34,16 +34,16 @@ function getAnonymizedName() {
 }
 
 export async function main() {
-    console.log('🌱 Starting comprehensive database seeding...\n');
+    console.log('🌱 Starting database seeding (modern EventTicketType system)...\n');
 
     // 1. Create Admin Users with proper permissions
     console.log('👥 Creating admin users...');
     const allPermissions = [
         "EventManagement", "UserManagement", "OrderManagement", 
-        "CategoryManagement", "SeatMapManagement", "LocalizationManagement",
+        "TicketManagement", "EventTicketTypes", "LocalizationManagement",
         "OptionsManagement", "TaskManagement", "NotificationManagement",
         "ApiKeyManagement", "EmailManagement", "Orders",
-        "EventSeatMaps", "Options", "EventCategories", "Translation"
+        "Options", "Translation"
     ];
 
     const adminUsers = [];
@@ -111,67 +111,8 @@ export async function main() {
 
     console.log(`✅ Created ${venues.length} venues`);
 
-    // 3. Create Categories (legacy system - still needed for backward compatibility)
-    console.log('\n🏷️ Creating ticket categories...');
-    const categories = [];
-    
-    const categoryData = [
-        { label: "Free Entry", price: 0, color: "#4CAF50" },
-        { label: "Standard Entry", price: 5, color: "#2196F3" },
-        { label: "Standard Entry", price: 10, color: "#2196F3" },
-        { label: "Standard Entry", price: 15, color: "#2196F3" },
-        { label: "Standard Entry", price: 20, color: "#2196F3" },
-        { label: "Supporter Ticket", price: 25, color: "#FF9800" },
-        { label: "Child Entry", price: 8, color: "#9C27B0" },
-        { label: "Young Person", price: 12, color: "#9C27B0" }
-    ];
-
-    for (const catData of categoryData) {
-        const category = await prisma.category.create({
-            data: catData
-        });
-        categories.push(category);
-    }
-    console.log(`✅ Created ${categories.length} categories`);
-
-    // 4. Create SeatMap (for seatmap events)
-    console.log('\n🪑 Creating seat map...');
-    const seatMap = await prisma.seatMap.create({
-        data: {
-            definition: JSON.stringify([
-                [
-                    {"id":1,"category":1,"amount":1,"type":"seat"},
-                    {"id":2,"category":1,"amount":1,"type":"seat"},
-                    {"id":3,"category":1,"amount":1,"type":"seat"},
-                    {"id":4,"category":1,"amount":1,"type":"seat"},
-                    {"id":5,"category":1,"amount":1,"type":"seat"},
-                    {"id":6,"category":1,"amount":1,"type":"seat"},
-                    {"type":"space"},
-                    {"id":7,"category":1,"amount":1,"type":"seat"},
-                    {"id":8,"category":1,"amount":1,"type":"seat"},
-                    {"id":9,"category":1,"amount":1,"type":"seat"},
-                    {"id":10,"category":1,"amount":1,"type":"seat"}
-                ],
-                [
-                    {"id":11,"category":2,"amount":1,"type":"seat"},
-                    {"id":12,"category":2,"amount":1,"type":"seat"},
-                    {"id":13,"category":2,"amount":1,"type":"seat"},
-                    {"id":14,"category":2,"amount":1,"type":"seat"},
-                    {"id":15,"category":2,"amount":1,"type":"seat"},
-                    {"id":16,"category":2,"amount":1,"type":"seat"},
-                    {"type":"space"},
-                    {"id":17,"category":2,"amount":1,"type":"seat"},
-                    {"id":18,"category":2,"amount":1,"type":"seat"},
-                    {"id":19,"category":2,"amount":1,"type":"seat"},
-                    {"id":20,"category":2,"amount":1,"type":"seat"}
-                ]
-            ])
-        }
-    });
-    console.log('✅ Created seat map with 20 seats');
-
-    // 5. Create Events with modern structure
-    console.log('\n🎭 Creating events...');
+    // 3. Create Events with modern EventTicketType system
+    console.log('\n🎭 Creating events with ticket types...');
     const events = [];
     
     const eventData = [
@@ -180,12 +121,10 @@ export async function main() {
             seatType: "free",
             description: "Join us for a hands-on gardening workshop where you'll learn sustainable growing techniques and help tend our community garden.",
             venueId: venue2.id,
-            hasTicketTypes: true,
             ticketTypes: [
-                { name: "Standard", price: 500, capacity: 20 }, // £5.00
-                { name: "Supporter", price: 1000, capacity: 10 } // £10.00
-            ],
-            categories: [categories[1].id] // Standard Entry £5
+                { name: "Standard", price: 500, capacity: 20 },
+                { name: "Supporter", price: 1000, capacity: 10 }
+            ]
         },
         {
             title: "Rosh Hashanah Community Dinner",
@@ -193,53 +132,49 @@ export async function main() {
             description: "Celebrate the Jewish New Year with a delicious vegetarian feast and meaningful community connections.",
             bespokeMessage: "Please let us know of any dietary requirements when booking. We look forward to celebrating with you!",
             venueId: venue1.id,
-            hasTicketTypes: true,
             ticketTypes: [
-                { name: "Adult", price: 2500, capacity: 50 }, // £25.00
-                { name: "Child (under 12)", price: 1200, capacity: 20 }, // £12.00
-                { name: "Young Person (13-25)", price: 1500, capacity: 15 } // £15.00
-            ],
-            categories: [categories[5].id] // Supporter Ticket £25
+                { name: "Adult", price: 2500, capacity: 50 },
+                { name: "Child (under 12)", price: 1200, capacity: 20 },
+                { name: "Young Person (13-25)", price: 1500, capacity: 15 }
+            ]
         },
         {
             title: "Sustainable Fashion Workshop",
             seatType: "free",
             description: "Learn to upcycle clothing and discover sustainable fashion alternatives in this interactive workshop.",
             venueId: venue1.id,
-            hasTicketTypes: true,
             ticketTypes: [
-                { name: "Standard", price: 1500, capacity: 25 }, // £15.00
-                { name: "Supporter", price: 2500, capacity: 10 } // £25.00
-            ],
-            categories: [categories[3].id] // Standard Entry £15
+                { name: "Standard", price: 1500, capacity: 25 },
+                { name: "Supporter", price: 2500, capacity: 10 }
+            ]
         },
         {
             title: "Free Community Lunch",
             seatType: "free",
             description: "A welcoming community lunch open to all. Come and meet your neighbors over delicious vegetarian food.",
             venueId: venue1.id,
-            hasTicketTypes: false,
-            categories: [categories[0].id] // Free Entry
+            ticketTypes: [
+                { name: "Free Entry", price: 0, capacity: 100 }
+            ]
         },
         {
             title: "Young JVS Meet-up",
             seatType: "free",
             description: "Social gathering for young members of the JVS community. Great food, great company, great conversations!",
             venueId: venue1.id,
-            hasTicketTypes: true,
             ticketTypes: [
-                { name: "Young Person", price: 800, capacity: 30 } // £8.00
-            ],
-            categories: [categories[7].id] // Young Person £12
+                { name: "Young Person", price: 800, capacity: 30 }
+            ]
         },
         {
-            title: "Theater Evening with Assigned Seating",
-            seatType: "seatmap",
-            description: "Special theatrical performance with reserved seating. A unique cultural experience for our community.",
+            title: "Theater Evening",
+            seatType: "free",
+            description: "Special theatrical performance. A unique cultural experience for our community.",
             venueId: venue1.id,
-            seatMapId: seatMap.id,
-            hasTicketTypes: false,
-            categories: [categories[4].id, categories[5].id] // Standard £20 + Supporter £25
+            ticketTypes: [
+                { name: "Standard", price: 2000, capacity: 40 },
+                { name: "Supporter", price: 2500, capacity: 20 }
+            ]
         }
     ];
 
@@ -254,13 +189,7 @@ export async function main() {
                 bespokeMessage: eventInfo.bespokeMessage,
                 slug: slug,
                 venueId: eventInfo.venueId,
-                seatMapId: eventInfo.seatMapId,
                 isActive: true,
-                categories: {
-                    create: eventInfo.categories.map(categoryId => ({
-                        categoryId: categoryId
-                    }))
-                },
                 dates: {
                     create: [
                         {
@@ -277,28 +206,28 @@ export async function main() {
             }
         });
 
-        // Create EventTicketTypes if specified
-        if (eventInfo.hasTicketTypes && eventInfo.ticketTypes) {
-            for (const ticketType of eventInfo.ticketTypes) {
-                await prisma.eventTicketType.create({
-                    data: {
-                        eventId: event.id,
-                        name: ticketType.name,
-                        price: ticketType.price,
-                        capacity: ticketType.capacity,
-                        currency: "GBP",
-                        isActive: true,
-                        isPublic: true
-                    }
-                });
-            }
+        // Create EventTicketTypes
+        const createdTicketTypes = [];
+        for (const ticketType of eventInfo.ticketTypes) {
+            const created = await prisma.eventTicketType.create({
+                data: {
+                    eventId: event.id,
+                    name: ticketType.name,
+                    price: ticketType.price,
+                    capacity: ticketType.capacity,
+                    currency: "GBP",
+                    isActive: true,
+                    isPublic: true
+                }
+            });
+            createdTicketTypes.push(created);
         }
 
-        events.push(event);
-        console.log(`✅ Created event: ${eventInfo.title}`);
+        events.push({ ...event, ticketTypes: createdTicketTypes });
+        console.log(`✅ Created event: ${eventInfo.title} (${createdTicketTypes.length} ticket types)`);
     }
 
-    // 6. Create Discount Codes
+    // 4. Create Discount Codes
     console.log('\n💰 Creating discount codes...');
     const discountCodes = [];
     
@@ -309,7 +238,7 @@ export async function main() {
             discountType: "percentage",
             discountValue: 20,
             usageLimit: 100,
-            validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year
+            validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
         },
         {
             code: "STUDENT50", 
@@ -323,9 +252,9 @@ export async function main() {
             code: "EARLYBIRD",
             description: "Early bird £5 discount",
             discountType: "fixed",
-            discountValue: 500, // £5.00 in pence
+            discountValue: 500,
             usageLimit: 25,
-            validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+            validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
         }
     ];
 
@@ -334,35 +263,47 @@ export async function main() {
             data: {
                 ...discountInfo,
                 createdById: adminUsers[0].id,
-                appliesToEvents: [],
-                appliesToCategories: []
+                appliesToEvents: []
             }
         });
         discountCodes.push(discountCode);
         console.log(`✅ Created discount code: ${discountInfo.code}`);
     }
 
-    // 7. Create realistic Orders with anonymized users
+    // 5. Create realistic Orders with anonymized users
     console.log('\n📋 Creating orders with anonymized user data...');
     
     const paymentTypes = ['stripe', 'pending', 'invoice'];
-    const statuses = ['PAID', 'PENDING', 'CANCELLED'];
+    const statuses = ['PAID', 'CONFIRMED', 'PENDING', 'CANCELLED'];
     const locales = ['en-GB', 'en-US'];
     
     for (let i = 0; i < 50; i++) {
         const { firstName, lastName } = getAnonymizedName();
         const eventToUse = faker.helpers.arrayElement(events);
         const paymentType = faker.helpers.arrayElement(paymentTypes);
-        const status = paymentType === 'stripe' ? 'PAID' : faker.helpers.arrayElement(statuses);
-        const useDiscount = Math.random() < 0.2; // 20% chance of discount
+        const status = paymentType === 'stripe' ? faker.helpers.arrayElement(['PAID', 'CONFIRMED']) : faker.helpers.arrayElement(statuses);
+        const useDiscount = Math.random() < 0.2;
         const discountCode = useDiscount ? faker.helpers.arrayElement(discountCodes) : null;
         
         const orderDate = faker.date.recent();
         
         // Get ticket types for this event
-        const eventTicketTypes = await prisma.eventTicketType.findMany({
-            where: { eventId: eventToUse.id }
-        });
+        const ticketType = faker.helpers.arrayElement(eventToUse.ticketTypes);
+        const ticketQuantity = getRandom(1, 3);
+        
+        // Calculate totals
+        const originalTotal = ticketType.price * ticketQuantity;
+        let finalTotal = originalTotal;
+        let discountAmount = 0;
+        
+        if (discountCode) {
+            if (discountCode.discountType === 'percentage') {
+                discountAmount = Math.round(originalTotal * (discountCode.discountValue / 100));
+            } else {
+                discountAmount = Math.min(discountCode.discountValue, originalTotal);
+            }
+            finalTotal = originalTotal - discountAmount;
+        }
         
         const order = await prisma.order.create({
             data: {
@@ -371,9 +312,9 @@ export async function main() {
                         firstName: firstName,
                         lastName: lastName,
                         email: faker.internet.email(),
-                        address: faker.address.streetAddress(),
-                        city: faker.address.city(),
-                        zip: faker.address.zipCode(),
+                        address: faker.location.streetAddress(),
+                        city: faker.location.city(),
+                        zip: faker.location.zipCode(),
                         countryCode: 'GB',
                         regionCode: 'London',
                         phone: faker.phone.number('07### ######')
@@ -389,7 +330,9 @@ export async function main() {
                 invoiceNumber: i + 1,
                 eventDateId: eventToUse.dates[0]?.id || 1,
                 discountCodeId: discountCode?.id,
-                discountAmount: discountCode ? (discountCode.discountType === 'percentage' ? 0 : discountCode.discountValue) : 0,
+                discountAmount: discountAmount,
+                originalTotal: originalTotal,
+                finalTotal: finalTotal,
                 paymentIntent: paymentType === 'stripe' ? JSON.stringify({
                     id: `pi_${randomUUID().replace(/-/g, '')}`,
                     status: 'succeeded'
@@ -397,58 +340,32 @@ export async function main() {
             }
         });
 
-        // Create tickets based on event type
-        const ticketQuantity = getRandom(1, 3);
-        
-        if (eventTicketTypes.length > 0) {
-            // Modern ticket system - create OrderItems and Tickets
-            const ticketType = faker.helpers.arrayElement(eventTicketTypes);
-            
-            await prisma.orderItem.create({
+        // Create OrderItem
+        await prisma.orderItem.create({
+            data: {
+                orderId: order.id,
+                eventTicketTypeId: ticketType.id,
+                quantity: ticketQuantity,
+                unitPrice: ticketType.price,
+                currency: 'GBP'
+            }
+        });
+
+        // Create individual Tickets (availability is computed from these rows)
+        for (let j = 0; j < ticketQuantity; j++) {
+            await prisma.ticket.create({
                 data: {
                     orderId: order.id,
                     eventTicketTypeId: ticketType.id,
-                    quantity: ticketQuantity,
-                    unitPrice: ticketType.price,
-                    currency: 'GBP'
+                    priceCharged: ticketType.price,
+                    currency: 'GBP',
+                    amount: 1,
+                    secret: randomUUID(),
+                    firstName: firstName,
+                    lastName: lastName,
+                    used: Math.random() < 0.1
                 }
             });
-
-            // Create individual tickets
-            for (let j = 0; j < ticketQuantity; j++) {
-                await prisma.ticket.create({
-                    data: {
-                        orderId: order.id,
-                        eventTicketTypeId: ticketType.id,
-                        priceCharged: ticketType.price,
-                        secret: randomUUID(),
-                        used: Math.random() < 0.1 // 10% chance ticket is used
-                    }
-                });
-            }
-        } else {
-            // Legacy system - create tickets with categories
-            const eventCategories = await prisma.categoriesOnEvents.findMany({
-                where: { eventId: eventToUse.id },
-                include: { category: true }
-            });
-            
-            if (eventCategories.length > 0) {
-                const categoryToUse = faker.helpers.arrayElement(eventCategories);
-                
-                for (let j = 0; j < ticketQuantity; j++) {
-                    await prisma.ticket.create({
-                        data: {
-                            orderId: order.id,
-                            categoryId: categoryToUse.categoryId,
-                            priceCharged: Math.round(categoryToUse.category.price * 100), // Convert to pence
-                            secret: randomUUID(),
-                            used: Math.random() < 0.1,
-                            seatId: eventToUse.seatType === 'seatmap' ? getRandom(1, 20) : null
-                        }
-                    });
-                }
-            }
         }
 
         if (i % 10 === 0) {
@@ -456,7 +373,7 @@ export async function main() {
         }
     }
 
-    // 8. Create System Options
+    // 6. Create System Options
     console.log('\n⚙️ Creating system options...');
     const options = [
         { key: Options.InvoiceNumber, value: JSON.stringify({ value: 51 }) },
@@ -474,7 +391,7 @@ export async function main() {
     }
     console.log(`✅ Created ${options.length} system options`);
 
-    // 9. Create Email Settings
+    // 7. Create Email Settings
     console.log('\n📧 Creating email settings...');
     await prisma.emailSettings.create({
         data: {
@@ -497,8 +414,7 @@ export async function main() {
     console.log('\n📊 Summary:');
     console.log(`👥 Admin Users: ${adminUsers.length}`);
     console.log(`🏢 Venues: ${venues.length}`);
-    console.log(`🏷️ Categories: ${categories.length}`);
-    console.log(`🎭 Events: ${events.length}`);
+    console.log(`🎭 Events: ${events.length} (with EventTicketTypes)`);
     console.log(`💰 Discount Codes: ${discountCodes.length}`);
     console.log(`📋 Orders: 50 (with anonymized users)`);
     console.log(`⚙️ System Options: ${options.length}`);
@@ -518,5 +434,3 @@ main()
     .finally(async () => {
         await prisma.$disconnect();
     });
-
-

@@ -31,12 +31,7 @@ async function listAllEventsAndOrders() {
             }
           }
         },
-        ticketTypes: true,
-        categories: {
-          include: {
-            category: true
-          }
-        }
+        ticketTypes: true
       },
       orderBy: { id: 'asc' }
     })
@@ -48,7 +43,6 @@ async function listAllEventsAndOrders() {
         console.log(`\n${index + 1}. Event ID: ${event.id}`)
         console.log(`   Title: ${event.title}`)
         console.log(`   Slug: ${event.slug || 'N/A'}`)
-        console.log(`   Seat Type: ${event.seatType}`)
         console.log(`   Active: ${event.isActive ? '✅' : '❌'}`)
         console.log(`   Venue: ${event.venue?.name || 'N/A'} (${event.venue?.city || ''})`)
         console.log(`   Description: ${event.description || 'N/A'}`)
@@ -56,11 +50,6 @@ async function listAllEventsAndOrders() {
         console.log(`   Ticket Types: ${event.ticketTypes.length}`)
         event.ticketTypes.forEach(tt => {
           console.log(`     - ${tt.name}: £${(tt.price / 100).toFixed(2)} (${tt.capacity || 'unlimited'} capacity, ${tt.sold} sold)`)
-        })
-
-        console.log(`   Categories: ${event.categories.length}`)
-        event.categories.forEach(cat => {
-          console.log(`     - ${cat.category.label}: £${cat.category.price.toFixed(2)} (max: ${cat.maxAmount || 'unlimited'})`)
         })
 
         console.log(`   Event Dates: ${event.dates.length}`)

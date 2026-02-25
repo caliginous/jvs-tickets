@@ -6,14 +6,14 @@ import { Button } from '../ui';
 
 interface TicketSelectionProps {
   event: any;
-  categories: any[];
+  ticketTypes: any[];
   isActive: boolean;
   onComplete: () => void;
 }
 
 export const TicketSelection: React.FC<TicketSelectionProps> = ({
   event,
-  categories,
+  ticketTypes,
   isActive,
   onComplete
 }) => {
@@ -31,13 +31,13 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
     if (order.tickets.length > 0) {
       const newQuantities: Record<number, number> = {};
       order.tickets.forEach(ticket => {
-        newQuantities[ticket.categoryId] = (newQuantities[ticket.categoryId] || 0) + ticket.amount;
+        newQuantities[ticket.ticketTypeId] = (newQuantities[ticket.ticketTypeId] || 0) + ticket.amount;
       });
       setQuantities(newQuantities);
     }
   }, [order.tickets]);
 
-  const handleQuantityChange = useCallback((categoryId: number, change: number) => {
+  const handleQuantityChange = useCallback((ticketTypeId: number, change: number) => {
     const now = Date.now();
     
     // Prevent rapid clicks with cooldown
@@ -55,12 +55,12 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
     
     // Use functional update to ensure we're working with the latest state
     setQuantities(prev => {
-      const currentQty = prev[categoryId] || 0;
+      const currentQty = prev[ticketTypeId] || 0;
       const newQty = Math.max(0, currentQty + change);
       
       return {
         ...prev,
-        [categoryId]: newQty
+        [ticketTypeId]: newQty
       };
     });
 
@@ -82,25 +82,25 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
   const updateOrder = useCallback(() => {
     const newTickets: any[] = [];
     
-    Object.entries(quantities).forEach(([categoryId, amount]) => {
+    Object.entries(quantities).forEach(([ticketTypeId, amount]) => {
       if (amount > 0) {
-        const category = categories.find(c => c && c.id === parseInt(categoryId));
-        if (category && category.name && typeof category.price === 'number') {
+        const ticketType = ticketTypes.find(t => t && t.id === parseInt(ticketTypeId));
+        if (ticketType && ticketType.name && typeof ticketType.price === 'number') {
           newTickets.push({
-            categoryId: parseInt(categoryId),
-            categoryName: category.name,
-            name: category.name, // Required by payment system
+            ticketTypeId: parseInt(ticketTypeId),
+            ticketTypeName: ticketType.name,
+            name: ticketType.name,
             amount: amount,
-            price: category.price
+            price: ticketType.price
           });
         } else {
-          console.error('TicketSelection: Invalid category data for ID:', categoryId, category);
+          console.error('TicketSelection: Invalid ticket type data for ID:', ticketTypeId, ticketType);
         }
       }
     });
 
     dispatch(setTickets(newTickets));
-  }, [quantities, categories, dispatch]);
+  }, [quantities, ticketTypes, dispatch]);
 
   // Update order whenever quantities change, but with debouncing
   useEffect(() => {
@@ -120,13 +120,13 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
     };
   }, []);
 
-  // Safety check: Ensure categories is a valid array (AFTER all hooks)
-  if (!categories || !Array.isArray(categories) || categories.length === 0) {
-    console.error('TicketSelection: Invalid categories prop:', categories);
+  // Safety check: Ensure ticketTypes is a valid array (AFTER all hooks)
+  if (!ticketTypes || !Array.isArray(ticketTypes) || ticketTypes.length === 0) {
+    console.error('TicketSelection: Invalid ticketTypes prop:', ticketTypes);
     return (
       <div className="text-center py-8">
         <div className="text-red-600 text-lg font-semibold mb-2">
-          Unable to load ticket categories
+          Unable to load ticket types
         </div>
         <p className="text-gray-600">
           Please refresh the page or contact support if the problem persists.
@@ -234,9 +234,9 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
 
   const getTotalTickets = () => Object.values(quantities).reduce((sum, qty) => sum + qty, 0);
   const getTotalPrice = () => {
-    return Object.entries(quantities).reduce((total, [categoryId, amount]) => {
-      const category = categories.find(c => c.id === parseInt(categoryId));
-      return total + ((category?.price || 0) * amount);
+    return Object.entries(quantities).reduce((total, [ticketTypeId, amount]) => {
+      const ticketType = ticketTypes.find(t => t.id === parseInt(ticketTypeId));
+      return total + ((ticketType?.price || 0) * amount);
     }, 0);
   };
 
@@ -274,7 +274,7 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
         </Card>
       )}
 
-      {/* Ticket Categories - Single Row Layout */}
+      {/* Ticket Types - Single Row Layout */}
       <div className="space-y-6">
         {/* Section Header */}
         <div className="border-b-2 border-primary-200 pb-3">
@@ -282,26 +282,26 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
             Select Your Tickets
           </h4>
           <p className="text-neutral-600">
-            Choose the number of tickets you need for each category
+            Choose the number of tickets you need for each type
           </p>
         </div>
 
         {/* Ticket Cards Grid - Horizontal Layout */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {categories.map((category) => {
-            // Safety check: Ensure category has required properties
-            if (!category || typeof category !== 'object' || !category.id || !category.name) {
-              console.error('TicketSelection: Invalid category object:', category);
-              return null; // Skip invalid categories
+          {ticketTypes.map((ticketType) => {
+            // Safety check: Ensure ticketType has required properties
+            if (!ticketType || typeof ticketType !== 'object' || !ticketType.id || !ticketType.name) {
+              console.error('TicketSelection: Invalid ticketType object:', ticketType);
+              return null; // Skip invalid ticket types
             }
             
-            const quantity = quantities[category.id] || 0;
-            const isAvailable = category.available !== undefined ? category.available > 0 : true;
-            const remaining = category.available !== undefined ? category.available - quantity : null;
+            const quantity = quantities[ticketType.id] || 0;
+            const isAvailable = ticketType.available !== undefined ? ticketType.available > 0 : true;
+            const remaining = ticketType.available !== undefined ? ticketType.available - quantity : null;
 
             return (
               <Card
-                key={category.id}
+                key={ticketType.id}
                 className={`bg-white border rounded-lg p-6 shadow-sm transition-all duration-200 ${
                   quantity > 0
                     ? 'border-primary-400 bg-primary-50 shadow-lg'
@@ -311,10 +311,10 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
                 <CardHeader className="pb-4">
                   <div className="text-center">
                     <CardTitle className="text-xl mb-2 text-neutral-900">
-                      {category.name}
+                      {ticketType.name}
                     </CardTitle>
                     <p className="text-sm text-gray-600 mb-3">
-                      {category.description || 'Standard admission ticket'}
+                      {ticketType.description || 'Standard admission ticket'}
                     </p>
                     
                   </div>
@@ -324,11 +324,11 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
                   {/* Price */}
                   <div className="text-center">
                     <div className="text-2xl font-bold text-green-700">
-                      £{category.price?.toFixed(2) || '0.00'}
+                      £{ticketType.price?.toFixed(2) || '0.00'}
                     </div>
-                    {category.originalPrice && category.originalPrice > category.price && (
+                    {ticketType.originalPrice && ticketType.originalPrice > ticketType.price && (
                       <div className="text-sm text-gray-600 line-through mt-1">
-                        £{category.originalPrice.toFixed(2)}
+                        £{ticketType.originalPrice.toFixed(2)}
                       </div>
                     )}
                   </div>
@@ -339,7 +339,7 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => handleQuantityChange(category.id, -1)}
+                        onClick={() => handleQuantityChange(ticketType.id, -1)}
                         disabled={quantity === 0 || !isAvailable || isUpdating}
                         className="w-10 h-10 rounded-full p-0 button-no-shake transition-all duration-200 hover:scale-105 active:scale-95"
                       >
@@ -355,7 +355,7 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={() => handleQuantityChange(category.id, 1)}
+                        onClick={() => handleQuantityChange(ticketType.id, 1)}
                         disabled={!isAvailable || (remaining !== null && quantity >= remaining) || isUpdating}
                         className="w-10 h-10 rounded-full p-0 button-no-shake transition-all duration-200 hover:scale-105 active:scale-95"
                       >
@@ -368,7 +368,7 @@ export const TicketSelection: React.FC<TicketSelectionProps> = ({
                     {/* Subtotal */}
                     <div className="text-center">
                       <div className="text-lg font-bold text-neutral-900">
-                        £{((category.price || 0) * quantity).toFixed(2)}
+                        £{((ticketType.price || 0) * quantity).toFixed(2)}
                       </div>
                     </div>
                   </div>

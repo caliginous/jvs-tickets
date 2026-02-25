@@ -6,6 +6,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { CAPACITY_RESERVED_STATUSES_ARRAY } from '../../../constants/orderStatuses';
 // TODO: Import generateSecret after fixing import issues
 // import { generateSecret } from '../../constants/serverUtil';
 
@@ -54,22 +55,22 @@ export async function createOrderWithEventTicketTypes(
   request: CreateOrderRequest
 ): Promise<CreateOrderResult> {
   try {
-    // Step 1: Reserve capacity atomically using the capacity service
-    // This prevents race conditions by immediately incrementing the sold counter
-    const capacityService = await import('./capacity');
-    const capacityReservations = request.items.map(item => ({
+    // Step 1: Check capacity using the canonical availability service
+    // Capacity is reserved by creating the PENDING order with tickets - the cleanup cron
+    // handles expiring abandoned checkouts. No need to increment sold counter.
+    const { checkCapacityForOrder } = await import('./availability');
+    const capacityItems = request.items.map(item => ({
       eventTicketTypeId: item.eventTicketTypeId,
       quantity: item.quantity
     }));
     
-    const capacityResults = await capacityService.reserveCapacity(capacityReservations);
+    const capacityCheck = await checkCapacityForOrder(request.eventDateId, capacityItems);
     
-    // Check if any reservations failed
-    const failedReservation = capacityResults.find(r => !r.success);
-    if (failedReservation) {
+    if (!capacityCheck.success) {
+      const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Failed to reserve capacity';
       return {
         success: false,
-        error: failedReservation.error || 'Failed to reserve capacity'
+        error: errorMessage
       };
     }
 
@@ -375,17 +376,16 @@ export async function transferTickets(
 
 /**
  * Release capacity for a specific ticket type
+ * 
+ * NOTE: This is now a no-op. Capacity is computed dynamically from Ticket rows.
+ * When orders are cancelled/refunded, capacity is automatically released because
+ * the status changes to a non-reserved status (CANCELLED, REFUNDED, etc.) and
+ * those tickets stop being counted by the availability service.
  */
 async function releaseCapacity(eventTicketTypeId: number, quantity: number) {
-  try {
-    await prisma.eventTicketType.update({
-      where: { id: eventTicketTypeId },
-      data: { sold: { decrement: quantity } }
-    });
-    console.log(`[ORDER-SERVICE] Released ${quantity} capacity for ticket type ${eventTicketTypeId}`);
-  } catch (error) {
-    console.error(`[ORDER-SERVICE] Failed to release capacity for ticket type ${eventTicketTypeId}:`, error);
-  }
+  // No-op: EventTicketType.sold is deprecated
+  // Capacity is released automatically when Order.status changes to a non-reserved status
+  console.log(`[ORDER-SERVICE] Capacity release is automatic via order status (ticket type ${eventTicketTypeId}, qty ${quantity})`);
 }
 
 /**
@@ -405,10 +405,7 @@ export async function reserveCapacity(prisma: PrismaClient, items: OrderItem[]) 
       where: {
         eventTicketTypeId: item.eventTicketTypeId,
         order: {
-          status: {
-            // Include PARTIALLY_REFUNDED as those tickets are still valid
-            in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED']
-          }
+          status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
         }
       }
     });

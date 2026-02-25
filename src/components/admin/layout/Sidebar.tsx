@@ -48,14 +48,6 @@ export const sidebarConfig = [
                 path: "/admin/events"
             },
             {
-                title: "Ticket Types",
-                path: "/admin/events/categories"
-            },
-            {
-                title: "Seat Maps",
-                path: "/admin/events/seatmaps"
-            },
-            {
                 title: "Venues",
                 path: "/admin/events/venues"
             },

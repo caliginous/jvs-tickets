@@ -25,7 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
         tickets: {
           include: {
-            category: true
+            eventTicketType: true
           }
         },
         user: true
@@ -59,10 +59,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       
       // Prepare ticket details
       const ticketDetails = order.tickets.map(ticket => ({
-        categoryId: ticket.categoryId,
+        ticketTypeId: ticket.eventTicketTypeId ?? 0,
         amount: ticket.amount,
-        price: ticket.category?.price || 0,
-        name: ticket.category?.label || 'Ticket'
+        price: ticket.eventTicketType?.price ?? 0,
+        name: ticket.eventTicketType?.name ?? 'Ticket'
       }));
 
       // Create Stripe payment link
@@ -114,9 +114,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           eventName: order.eventDate?.event?.title,
           eventDate: order.eventDate?.date,
           tickets: order.tickets.map(t => ({
-            category: t.category?.label,
+            ticketType: t.eventTicketType?.name,
             amount: t.amount,
-            price: t.category?.price
+            price: t.eventTicketType?.price
           }))
         },
         message: "Please try again or contact support if the issue persists"

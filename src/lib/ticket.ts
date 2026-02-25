@@ -116,15 +116,20 @@ export const generateTicketWithId = async (ticketId: string): Promise<Uint8Array
                     user: true
                 }
             },
-            category: true
+            eventTicketType: true
         }
     });
     const currency = await getOption(Options.Currency);
+    
+    // Use eventTicketType for ticket type label and price
+    const ticketTypeLabel = order.eventTicketType?.name ?? 'General Admission';
+    const ticketPrice = order.eventTicketType?.price ?? 0;
+    
     return await generateTicket(
         (await getOptionData(Options.TemplateTicket, getStaticAssetFile("ticket/template.pdf"))).data,
         {
-            seatInformation: order.seatId?.toString() ?? order.category.label,
-            price: order.category.price,
+            seatInformation: ticketTypeLabel,
+            price: ticketPrice,
             name: (order.firstName ?? order.order.user.firstName) + " " + (order.lastName ?? order.order.user.lastName),
             currency: currency,
             locale: order.order.locale,
@@ -154,23 +159,27 @@ export const generateTickets = async (
             },
             user: true,
             locale: true,
-            tickets: true
+            tickets: {
+                include: {
+                    eventTicketType: true
+                }
+            }
         }
     });
 
-    const categories = await prisma.category.findMany();
     const currency = await getOption(Options.Currency);
 
     return await Promise.all(
         orderDB.tickets.map(async (ticket) => {
-            const category = categories.find(
-                (category) => category.id === ticket.categoryId
-            );
+            // Use eventTicketType for ticket type label and price
+            const ticketTypeLabel = ticket.eventTicketType?.name ?? 'General Admission';
+            const ticketPrice = ticket.eventTicketType?.price ?? 0;
+            
             return await generateTicket(
                 template,
                 {
-                    seatInformation: ticket.seatId?.toString() ?? category.label,
-                    price: category.price,
+                    seatInformation: ticketTypeLabel,
+                    price: ticketPrice,
                     name: (ticket.firstName ?? orderDB.user.firstName) + " " + (ticket.lastName ?? orderDB.user.lastName),
                     currency: currency,
                     locale: orderDB.locale,

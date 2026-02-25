@@ -42,7 +42,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
         tickets: {
           include: {
-            category: true
+            eventTicketType: true
           }
         }
       }
@@ -124,16 +124,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         refundedAt: new Date()
       }
     });
-
-    // Release seats back to inventory (if seatmap booking)
-    if (order.seatMapId) {
-      for (const ticket of order.tickets) {
-        if (ticket.seatId) {
-          // Mark seat as available again
-          console.log(`🔄 [CUSTOMER CANCELLATION] Released seat ${ticket.seatId} back to inventory`);
-        }
-      }
-    }
 
     // Send cancellation email
     try {

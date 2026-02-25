@@ -129,14 +129,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
         });
 
-        // Release reserved seats back to inventory
-        for (const ticket of order.tickets) {
-            if (ticket.seatId) {
-                // Update seat availability (this would depend on your seat management system)
-                console.log(`[CANCELLATION] Releasing seat ${ticket.seatId} for order ${id}`);
-            }
-        }
-
         // Send cancellation email
         try {
             const emailTriggerService = new (await import('../../../../../lib/services/emailTriggerService')).EmailTriggerService();

@@ -29,7 +29,7 @@ interface BookingSection {
 
 interface UnifiedBookingPageProps {
   event: any;
-  categories: any[];
+  ticketTypes: any[];
   paymentMethods: any[];
   deliveryMethods: any[];
   shippingFees: any;
@@ -40,7 +40,7 @@ interface UnifiedBookingPageProps {
 
 export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
   event,
-  categories,
+  ticketTypes,
   paymentMethods,
   deliveryMethods,
   shippingFees,
@@ -149,10 +149,10 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
       
       const registrationData = {
         tickets: order.tickets.map(ticket => ({
-          categoryId: ticket.categoryId,
+          ticketTypeId: ticket.ticketTypeId,
           amount: ticket.amount,
           price: ticket.price,
-          name: `Ticket ${ticket.categoryId}`
+          name: (ticket as any).ticketTypeName || (ticket as any).name || `Ticket ${ticket.ticketTypeId}`
         })),
         eventDateId: event.dates[0].id,
         eventName: event.title,
@@ -367,8 +367,8 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
 
   const computeTotals = useCallback(() => {
     const subtotal = order.tickets.reduce((total, ticket) => {
-      const category = categories.find(c => c.id === ticket.categoryId);
-      const price = category?.price || 0;
+      const ticketType = ticketTypes.find(t => t.id === ticket.ticketTypeId);
+      const price = ticketType?.price || 0;
       return total + (price * ticket.amount);
     }, 0);
     
@@ -376,7 +376,7 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
     const total = subtotal + fees;
     
     return { subtotal, fees, total };
-  }, [order.tickets, categories]);
+  }, [order.tickets, ticketTypes]);
 
   if (!event) {
     return <div>Loading...</div>;
@@ -644,7 +644,7 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
                 </div>
                 <TicketSelection
                   event={event}
-                  categories={categories}
+                  ticketTypes={ticketTypes}
                   isActive={activeSection === 'tickets'}
                   onComplete={goNextSection}
                 />

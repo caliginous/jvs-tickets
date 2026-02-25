@@ -8,9 +8,9 @@ import { Permission, PermissionSection, PermissionType } from "./interfaces";
 import i18nConfig from "../../i18n";
 import { Ticket, Tickets } from "../store/reducers/orderReducer";
 import { eventDateIsBookable } from "./util";
-import { SeatMap } from "../components/seatselection/seatmap/SeatSelectionMap";
 import { randomBytes } from "crypto";
 import { logger } from "../lib/logger";
+import { checkCapacityForOrder } from "../lib/services/ticketing/availability";
 
 export function getStaticAssetFile(file, options = null) {
     let basePath = process.cwd();
@@ -332,7 +332,7 @@ export const revalidateBuild = async (res: NextApiResponse, page: string | strin
         const pagePath = page.replace(/^\/[a-z]{2}\//, ""); // Remove locale prefix if present
         
         if (!validPaths.includes(pagePath) && 
-            !pagePath.startsWith("/seatselection/") && 
+            !pagePath.startsWith("/booking/") && 
             !pagePath.startsWith("/events/")) {
             logger.revalidate(`Skipping revalidation for unknown path: ${page} (pagePath: ${pagePath})`);
             return;
@@ -349,206 +349,124 @@ export const revalidateBuild = async (res: NextApiResponse, page: string | strin
 
 export const revalidateEventPages = async (res, additionalPages: string[]) => {
     const eventDates = await prisma.eventDate.findMany();
-    const eventPaths = eventDates.map(eventDate => `/seatselection/${eventDate.id}`);
+    const eventPaths = eventDates.map(eventDate => `/booking/${eventDate.id}`);
 
     await revalidateBuild(res, eventPaths.concat(additionalPages));
 };
 
-export const validateOrder = async (tickets: Tickets, eventDateId, reservationId, checkEventBookable: boolean = true, bypassSeatValidation: boolean = false): Promise<[boolean, Tickets]> => {
-    logger.debug('validateOrder called with:', {
-        ticketsCount: tickets.length,
+/**
+ * Ticket selection for order validation
+ */
+export interface TicketSelection {
+    eventTicketTypeId: number;
+    quantity: number;
+}
+
+/**
+ * Validation result for order validation
+ */
+export interface ValidationResult {
+    success: boolean;
+    error?: string;
+    userMessage?: string;
+}
+
+/**
+ * Validate an order before processing
+ * 
+ * This function checks:
+ * 1. Event date exists
+ * 2. Event is bookable (within sale window)
+ * 3. Requested ticket types exist and are active
+ * 4. Sufficient capacity is available
+ */
+export const validateOrderNew = async (
+    items: TicketSelection[],
+    eventDateId: number,
+    checkEventBookable: boolean = true
+): Promise<ValidationResult> => {
+    logger.debug('validateOrderNew called with:', {
+        itemsCount: items.length,
         eventDateId,
-        reservationId,
-        checkEventBookable,
-        bypassSeatValidation
+        checkEventBookable
     });
-    
+
+    // 1. Check event date exists
     const eventDate = await prisma.eventDate.findUnique({
-        where: {
-            id: eventDateId
-        },
-        select: {
-            event: {
-                select: {
-                    seatType: true,
-                    categories: {
-                        select: {
-                            categoryId: true,
-                            maxAmount: true
-                        }
-                    }
-                }
-            },
-            date: true,
-            ticketSaleEndDate: true,
-            ticketSaleStartDate: true
-        }
+        where: { id: eventDateId }
     });
-    
-    // Check if eventDate exists
+
     if (!eventDate) {
-        return [false, tickets];
-    }
-    
-    if (checkEventBookable && !eventDateIsBookable(eventDate)) return [false, tickets];
-    
-    // Skip seat validation for Stripe flow if bypassSeatValidation is true
-    if (!bypassSeatValidation) {
-        logger.debug('Running full validation (bypassSeatValidation = false)');
-        const seatIds = tickets.filter(ticket => ticket.seatId);
-        if (eventDate.event.seatType === "seatMap" && seatIds.length !== tickets.length)
-            return [false, tickets.filter(ticket => !ticket.seatId)]; // all tickets of event with seat reservation need a seatId
-        if (seatIds.map(ticket => ticket.seatId).some((e, i, arr) => arr.indexOf(e) !== i))
-            return [false, tickets.filter((value, index, self) => self.indexOf(value) === index)]; //duplicated seat ids in order
-
-        // check seats not already occupied
-        const ticketsOccupied = await isTicketOccupied(eventDateId, tickets, reservationId);
-        if (Object.values(ticketsOccupied).length > 0 && Object.values(ticketsOccupied).some(v => v))
-            return [false, Object.entries(ticketsOccupied).filter(a => a[1]).map(a => tickets.find(ticket => ticket.seatId === parseInt(a[0])))];
-
-        // Category validation for non-Stripe flows
-        const maxTicketAmounts = eventDate.event.categories.reduce((dict, category) => {
-            dict[category.categoryId] = category.maxAmount;
-            return dict;
-        }, {});
-
-        let currentAmounts = await getCategoryTicketAmount(eventDateId, tickets, reservationId);
-        let invalidTickets = [];
-        for (let ticket of tickets) {
-            if (typeof currentAmounts[ticket.categoryId] === "undefined")
-                currentAmounts[ticket.categoryId] = 0;
-            currentAmounts[ticket.categoryId] += ticket.amount;
-            if (isNaN(maxTicketAmounts[ticket.categoryId]) || !maxTicketAmounts[ticket.categoryId] || maxTicketAmounts[ticket.categoryId] === 0)
-                continue; // category for this event isn't limited
-            if (currentAmounts[ticket.categoryId] > maxTicketAmounts[ticket.categoryId])
-                invalidTickets.push(ticket);
-        }
-        if (eventDate.event.seatType === "free" && invalidTickets.length > 0)
-            return [false, invalidTickets];
-    } else {
-        logger.debug('Skipping validation (bypassSeatValidation = true)');
+        logger.error(`[validateOrderNew] EventDate ${eventDateId} not found`);
+        return {
+            success: false,
+            error: 'Event date not found',
+            userMessage: 'This event is no longer available'
+        };
     }
 
-    logger.debug('Validation passed, returning [true, []]');
-    return [true, []];
-}
-
-export const getCategoryTicketAmount = async (eventDateId: number, tickets?: Tickets, reservationId?: string): Promise<Record<number, number>> => {
-    const categoryIdFilter = tickets !== undefined ? {categoryId: {in: tickets?.map(ticket => ticket.categoryId).filter((value, index, self) => self.indexOf(value) === index)}} : {};
-    const reservationIdFilter = reservationId !== undefined ? {reservationId: {not: reservationId}} : {};
-
-    let databaseAmounts = await prisma.ticket.groupBy({
-        by: ["categoryId"],
-        where: {
-            order: {
-                eventDateId: eventDateId
-            },
-            ...categoryIdFilter
-        },
-        _count: true
-    });
-    databaseAmounts.push(...(await prisma.seatReservation.groupBy({
-        by: ["categoryId"],
-        where: {
-            eventDateId: eventDateId,
-            ...categoryIdFilter,
-            ...reservationIdFilter,
-            expiresAt: {
-                gt: new Date()
-            },
-        },
-        _count: true
-    })));
-
-    return databaseAmounts.reduce((dict, element) => {
-        if (!dict[element.categoryId]) dict[element.categoryId] = 0;
-        dict[element.categoryId] = dict[element.categoryId] + element._count;
-        return dict;
-    }, {});
-}
-
-export const isTicketOccupied = async (eventDateId: number, tickets: Tickets | Ticket, reservationId?: string): Promise<Record<number, boolean>> => {
-    if (!Array.isArray(tickets))
-        tickets = [tickets];
-
-    if (tickets.length === 0) return {};
-
-    const reservations = await prisma.seatReservation.findMany({
-        where: {
-            eventDateId: eventDateId,
-            expiresAt: {
-                gt: new Date()
-            },
-            ...(reservationId && ({reservationId: {not: reservationId}}))
-        }
-    });
-    const ticketsDb = await prisma.ticket.findMany({
-        where: {
-            order: {
-                eventDateId: eventDateId
-            }
-        }
-    });
-
-    return tickets.reduce((group, ticket) => {
-        group[ticket.seatId] = ticketsDb.some(t => t.seatId === ticket.seatId) ||
-            reservations.some(reservation => reservation.seatId === ticket.seatId);
-        return group;
-    }, {});
-}
-
-export const getSeatMap = async (eventDateId, withOccupiedMarked, reservationId?): Promise<SeatMap> => {
-    const event = await prisma.eventDate.findUnique({
-        where: {
-            id: eventDateId
-        },
-        select: {
-            event: {
-                select: {
-                    seatMap: {
-                        select: {
-                            definition: true
-                        }
-                    },
-                    seatType: true,
-                    categories: {
-                        select: {
-                            category: {
-                                select: {
-                                    id: true,
-                                    price: true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-    if (event.event.seatType !== "seatmap") throw new Error("Event not seatmap!");
-
-    let seatMap: SeatMap = JSON.parse(event.event.seatMap.definition);
-    if (withOccupiedMarked) {
-        // Create a price lookup map from categories
-        const priceMap = event.event.categories.reduce((map, cat) => {
-            map[cat.category.id] = cat.category.price;
-            return map;
-        }, {});
-        
-        const occupies = await isTicketOccupied(eventDateId, seatMap.flat(2).map(seat => ({
-            seatId: seat.id, 
-            amount: seat.amount, 
-            categoryId: seat.category,
-            price: priceMap[seat.category] || 0 // Add price from category lookup
-        })), reservationId);
-        seatMap = seatMap.map((row) =>
-            row.map((seat) => {
-                return {
-                    ...seat,
-                    occupied: occupies[seat.id]
-                };
-            })
-        );
+    // 2. Check event is bookable (sale window)
+    if (checkEventBookable && !eventDateIsBookable(eventDate)) {
+        return {
+            success: false,
+            error: 'Event not in sale window',
+            userMessage: 'Ticket sales are not currently open for this event'
+        };
     }
-    return seatMap;
+
+    // 3. Validate ticket types exist and are active
+    const requestedTypeIds = Array.from(new Set(items.map(t => t.eventTicketTypeId)));
+    const validTypes = await prisma.eventTicketType.findMany({
+        where: {
+            id: { in: requestedTypeIds },
+            eventId: eventDate.eventId,
+            isActive: true
+        }
+    });
+
+    const validTypeIds = new Set(validTypes.map(tt => tt.id));
+    const invalidTypes = requestedTypeIds.filter(id => !validTypeIds.has(id));
+
+    if (invalidTypes.length > 0) {
+        logger.error(`[validateOrderNew] Invalid ticket types: ${invalidTypes.join(', ')}`);
+        return {
+            success: false,
+            error: `Invalid ticket types: ${invalidTypes.join(', ')}`,
+            userMessage: 'Some selected ticket types are no longer available'
+        };
+    }
+
+    // 4. Check capacity using centralized availability
+    const capacityCheck = await checkCapacityForOrder(eventDateId, items);
+    if (!capacityCheck.success) {
+        const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
+        logger.error(`[validateOrderNew] Capacity check failed: ${errorMessage}`);
+        return {
+            success: false,
+            error: errorMessage,
+            userMessage: errorMessage
+        };
+    }
+
+    logger.debug('validateOrderNew passed');
+    return { success: true };
+};
+
+/**
+ * Legacy validateOrder function - REMOVED
+ * @deprecated This function is no longer available. Use validateOrderNew instead.
+ * 
+ * This function was removed because:
+ * 1. It accepted a Redux Ticket[] format that doesn't match the modern EventTicketType system
+ * 2. It returned tickets in a format incompatible with Prisma's Ticket model
+ * 3. All callers should use validateOrderNew which works with TicketSelection[]
+ */
+export const validateOrder = async (_tickets: Tickets, _eventDateId: number, _reservationId: string | null, _checkEventBookable: boolean = true, _bypassSeatValidation: boolean = false): Promise<[boolean, Tickets]> => {
+    throw new Error(
+        'validateOrder is deprecated and has been removed. ' +
+        'Use validateOrderNew with TicketSelection[] format instead. ' +
+        'See /api/admin/orders/create-with-ticket-types for the correct implementation.'
+    );
 }
+
+// getCategoryTicketAmount was removed - use computeAvailability from availability service instead

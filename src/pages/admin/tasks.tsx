@@ -130,11 +130,11 @@ export async function getServerSideProps(context) {
                             user: true,
                             tickets: {
                                 include: {
-                                    category: true
+                                    eventTicketType: true
                                 }
                             }
                         }
-                    },
+                    }
                 }
             });
             const tasksSerializable = tasks.map(task => {
@@ -149,11 +149,10 @@ export async function getServerSideProps(context) {
                     }
                 }
             });
-            const categories = await prisma.category.findMany();
             return {
                 props: {
                     tasks: tasksSerializable,
-                    categories
+                    categories: [] // Categories deprecated - use ticket types
                 }
             };
         },

@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../lib/prisma";
 import { getEventUrl } from "../../utils/slug";
+import { CAPACITY_RESERVED_STATUSES_ARRAY } from "../../constants/orderStatuses";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Only allow GET requests - reject all other methods
@@ -28,11 +29,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             date: 'asc'
           }
         },
-        categories: {
-          include: {
-            category: true
-          }
-        },
         ticketTypes: true
       }
     });
@@ -45,14 +41,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!nextDate) return null;
 
       // Get global ticket limit and sold count for this event date
-      // Include PARTIALLY_REFUNDED as those tickets are still valid
       const globalTicketStats = await prisma.ticket.aggregate({
         where: {
           order: {
             eventDateId: nextDate.id,
-            status: {
-              in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED']
-            }
+            status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
           }
         },
         _count: {
@@ -60,29 +53,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       });
 
-      // Get per-category ticket counts using aggregation
-      // Include PARTIALLY_REFUNDED as those tickets are still valid
-      const categoryTicketStats = await prisma.ticket.groupBy({
-        by: ['categoryId'],
+      // Get per-ticket-type counts using aggregation
+      const ticketTypeStats = await prisma.ticket.groupBy({
+        by: ['eventTicketTypeId'],
         where: {
           order: {
             eventDateId: nextDate.id,
-            status: {
-              in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED']
-            }
-          }
+            status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+          },
+          eventTicketTypeId: { not: null }
         },
         _count: {
           id: true
         }
       });
 
-      // Create a map for quick lookup
-      const categorySoldMap = new Map(
-        categoryTicketStats.map(stat => [stat.categoryId, stat._count.id])
+      const ticketTypeSoldMap = new Map(
+        ticketTypeStats.map(stat => [stat.eventTicketTypeId!, stat._count.id])
       );
 
-      const categories = event.categories || [];
       const ticketTypes = event.ticketTypes || [];
       
       // Calculate ticket availability using aggregated data
@@ -108,11 +97,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ticketAvailability.available = Math.max(0, globalLimit - soldTickets);
           ticketAvailability.percentageRemaining = globalLimit > 0 ? Math.round((ticketAvailability.available / globalLimit) * 100) : 0;
         } else {
-          // No global limit, calculate from categories
-          categories.forEach(cat => {
-            const maxAmount = cat.maxAmount || 0;
-            // Use aggregated count for this category
-            const sold = categorySoldMap.get(cat.category.id) || 0;
+          // No global limit, calculate from ticket types (Category deprecated)
+          ticketTypes.forEach(tt => {
+            const maxAmount = tt.capacity || 999999;
+            const sold = ticketTypeSoldMap.get(tt.id) || 0;
             ticketAvailability.total += maxAmount;
             ticketAvailability.sold += sold;
             ticketAvailability.available += Math.max(0, maxAmount - sold);
@@ -121,50 +109,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }
 
-      // Use ticket types if available, otherwise fall back to categories
-      let categoryBreakdown = [];
-      
-      if (ticketTypes.length > 0) {
-        // Use modern ticket types system
-        categoryBreakdown = ticketTypes.map(tt => {
-          const maxAmount = tt.capacity || 999999; // Use capacity or default to unlimited if not set
-          // For ticket types, we'll assume no sold tickets for now (would need separate tracking)
-          const sold = tt.sold || 0; // Use sold from ticket type if available
-          const available = Math.max(0, maxAmount - sold);
-          const isAvailable = available > 0;
+      // Use ticket types (Category deprecated)
+      const categoryBreakdown = ticketTypes.map(tt => {
+        const maxAmount = tt.capacity || 999999;
+        const sold = ticketTypeSoldMap.get(tt.id) || 0;
+        const available = Math.max(0, maxAmount - sold);
+        const isAvailable = available > 0;
 
-          return {
-            id: tt.id,
-            name: tt.name,
-            price: tt.price / 100, // Convert from pence to pounds
-            color: tt.colorHex || '#000000',
-            maxAmount,
-            sold,
-            available,
-            isAvailable
-          };
-        });
-      } else {
-        // Fall back to legacy categories system
-        categoryBreakdown = categories.map(cat => {
-          const maxAmount = cat.maxAmount || 0;
-          // Use aggregated count for this category
-          const sold = categorySoldMap.get(cat.category.id) || 0;
-          const available = Math.max(0, maxAmount - sold);
-          const isAvailable = available > 0;
-
-          return {
-            id: cat.category.id,
-            name: cat.category.label,
-            price: cat.category.price,
-            color: cat.category.color,
-            maxAmount,
-            sold,
-            available,
-            isAvailable
-          };
-        });
-      }
+        return {
+          id: tt.id,
+          name: tt.name,
+          price: tt.price / 100, // Convert from pence to pounds
+          color: tt.colorHex || '#000000',
+          maxAmount,
+          sold,
+          available,
+          isAvailable
+        };
+      });
 
       // Create dates array for frontend compatibility (preserve exact structure)
       const dates = (event.dates || []).map(eventDate => ({
@@ -185,7 +147,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         url: getEventUrl({ id: event.id, slug: event.slug }),
         nextDate: nextDate?.date ? nextDate.date.toISOString() : null,
         minPrice: categoryBreakdown.length > 0 ? Math.min(...categoryBreakdown.map(c => c.price)) : null,
-        seatType: event.seatType,
         coverImage: event.coverImage,
         venue: event.venue ? {
           name: event.venue.name,

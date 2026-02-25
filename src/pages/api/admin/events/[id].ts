@@ -27,16 +27,12 @@ export default async function handler(
         include: {
             dates: true,
             customFields: true,
-            categories: {
-                include: {
-                    category: true
-                }
-            }
+            ticketTypes: true
         }
     });
 
     if (!event) {
-        res.status(404).end("Category not found");
+        res.status(404).end("Event not found");
         return;
     }
 
@@ -95,12 +91,6 @@ export default async function handler(
                         console.log(`🗑️ Deleted ${deletedOrders.count} orders`);
                     }
 
-                    // Delete seat reservations for these dates
-                    const deletedReservations = await tx.seatReservation.deleteMany({ 
-                        where: { eventDateId: { in: eventDateIds } } 
-                    });
-                    console.log(`🗑️ Deleted ${deletedReservations.count} seat reservations`);
-
                     // Delete the event dates
                     const deletedEventDates = await tx.eventDate.deleteMany({ 
                         where: { id: { in: eventDateIds } } 
@@ -119,12 +109,6 @@ export default async function handler(
                     where: { eventId } 
                 });
                 console.log(`🗑️ Deleted ${deletedCustomFields.count} custom fields`);
-
-                // Delete category relations
-                const deletedCategoryRelations = await tx.categoriesOnEvents.deleteMany({ 
-                    where: { eventId } 
-                });
-                console.log(`🗑️ Deleted ${deletedCategoryRelations.count} category relations`);
 
                 // Finally delete the event
                 const deletedEvent = await tx.event.delete({ where: { id: eventId } });
@@ -151,7 +135,7 @@ export default async function handler(
         console.log("Event ID:", id);
 
         
-        let { title, description, bespokeMessage, seatType, seatMapId, categories, personalTicket, isActive, maxAmounts = {}, dates, customFields, venueId, timezone, slug: providedSlug, eventDate, startTime, endTime, eventDateTicketLimit, ticketSaleEndDate } = req.body;
+        let { title, description, bespokeMessage, personalTicket, isActive, dates, customFields, venueId, timezone, slug: providedSlug, eventDate, startTime, endTime, eventDateTicketLimit, ticketSaleEndDate } = req.body;
 
         // Get original event data before update for revalidation purposes
         const originalEvent = await prisma.event.findUnique({
@@ -172,76 +156,6 @@ export default async function handler(
                     console.log(`🔄 Generating slug for updated event ${id} with title: ${title}`);
                     eventSlug = await generateEventSlug(title, parseInt(id as string));
                     console.log(`✅ Generated slug: ${eventSlug}`);
-                }
-
-                if (!categories && seatType === "seatmap") {
-            const seatMap = await tx.seatMap.findUnique({
-                where: {
-                    id: seatMapId
-                },
-                select: {
-                    definition: true
-                }
-            });
-            const definition = JSON.parse(seatMap.definition);
-            // transform to category ids and receive only unique ids
-            categories = definition
-                .map((row) => row.map((seat) => seat.category))
-                .flat(2)
-                .filter(
-                    (value, index, self) =>
-                        self.indexOf(value) === index && value !== undefined
-                );
-        }
-
-                if (categories) {
-                    console.log(`🔄 Updating categories for event ${id}:`, categories);
-                    console.log(`📊 Max amounts:`, maxAmounts);
-                    console.log(`📊 Categories type:`, typeof categories);
-                    console.log(`📊 Categories length:`, Array.isArray(categories) ? categories.length : 'not an array');
-                    console.log(`📊 Categories values:`, categories);
-                    console.log(`📊 Max amounts keys:`, Object.keys(maxAmounts));
-                    console.log(`📊 Max amounts values:`, Object.values(maxAmounts));
-                    
-                    const eventIdInt = parseInt(id as string);
-                    const categoryIds = categories.map(c => parseInt(c.toString()));
-                    
-                    // Delete categories that are no longer in the list
-                    console.log(`🔄 Deleting categories not in new list for event ${id}...`);
-                    const deleteResult = await tx.categoriesOnEvents.deleteMany({
-                        where: {
-                            eventId: eventIdInt,
-                            categoryId: {
-                                notIn: categoryIds
-                            }
-                        }
-                    });
-                    console.log(`✅ Deleted ${deleteResult.count} categories no longer in list`);
-
-                    // Upsert each category (update if exists, create if not)
-                    for (const category of categories) {
-                        const categoryId = parseInt(category.toString());
-                        const maxAmount = maxAmounts[category] ? parseInt(maxAmounts[category].toString()) : null;
-                        
-                        console.log(`🔄 Upserting category relation for category ${categoryId} with maxAmount ${maxAmount}`);
-                        const result = await tx.categoriesOnEvents.upsert({
-                            where: {
-                                eventId_categoryId: {
-                                    eventId: eventIdInt,
-                                    categoryId: categoryId
-                                }
-                            },
-                            update: {
-                                maxAmount: maxAmount
-                            },
-                            create: {
-                                eventId: eventIdInt,
-                                categoryId: categoryId,
-                                maxAmount: maxAmount
-                            }
-                        });
-                        console.log(`✅ Upserted category relation:`, result);
-                    }
                 }
 
                 // Handle event date updates with proper timezone conversion
@@ -493,8 +407,6 @@ export default async function handler(
                     ...(description !== undefined && { description: description }),
                     ...(bespokeMessage !== undefined && { bespokeMessage: bespokeMessage }),
                     ...(eventSlug && { slug: eventSlug }),
-                    ...(seatType && { seatType: seatType }),
-                    ...(seatMapId && { seatMapId: seatMapId }),
                     ...(personalTicket && { personalTicket }),
                     ...(isActive !== undefined && { isActive: isActive }),
                     ...(req.body.venueId !== undefined && {
@@ -534,7 +446,7 @@ export default async function handler(
             });
             
             const revalidationPaths = [
-                `/seatselection/${id as string}`, 
+                `/booking/${id as string}`, 
                 "/information",
                 "/" // Always revalidate homepage which lists events
             ];

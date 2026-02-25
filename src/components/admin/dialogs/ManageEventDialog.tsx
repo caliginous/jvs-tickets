@@ -6,7 +6,6 @@ import { DayPicker } from 'react-day-picker';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import axios from "axios";
-import { SeatMapDialog } from "./SeatMapDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { arrayEquals, formatPrice } from "../../../constants/util";
 import dynamic from 'next/dynamic';
@@ -28,8 +27,6 @@ const MinimalEditor = dynamic(() => import('../../MinimalEditor'), { ssr: false 
 interface ManageEventDialogProps {
     open: boolean;
     event: any;
-    seatmaps: any[];
-    categories: any[];
     venues: any[];
     onClose: () => void;
     onChange: () => void;
@@ -39,18 +36,11 @@ interface ManageEventDialogProps {
 export const ManageEventDialog = ({
     open,
     event,
-    seatmaps,
-    categories,
     venues,
     onClose,
     onChange,
     currency
 }: ManageEventDialogProps) => {
-    const originalSelectedCategories = useMemo(
-        () => event?.categories?.map((category: any) => category.category.id) ?? [],
-        [event]
-    );
-    
     const [openPreview, setOpenPreview] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [eventToDelete, setEventToDelete] = useState<any>(null);
@@ -73,10 +63,7 @@ export const ManageEventDialog = ({
             ...defaultManageEventValues,
             title: event?.title ?? "",
             description: event?.description ?? "",
-            seatType: event?.seatType ?? "free",
-            seatMapId: event?.seatMapId ?? undefined,
             venueId: event?.venueId ? event.venueId.toString() : ((venues?.length ?? 0) > 0 ? venues[0].id.toString() : ""),
-            selectedCategories: (originalSelectedCategories?.length ?? 0) > 0 ? originalSelectedCategories : (event ? [] : (categories?.slice(0, 1).map(c => c.id) ?? [])),
             personalTicket: event?.personalTicket ?? false,
             isActive: event?.isActive ?? true,
             eventDate: event?.dates?.[0]?.date ? new Date(event.dates[0].date).toISOString().split('T')[0] : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -105,12 +92,9 @@ export const ManageEventDialog = ({
     const { control, handleSubmit, watch, setValue, formState: { errors, isSubmitting }, reset } = form;
 
     // Watch values for conditional rendering
-    const seatType = watch('seatType');
     const title = watch('title');
     const subtitle = watch('subtitle');
     const venueId = watch('venueId');
-    const selectedCategories = watch('selectedCategories') ?? [];
-    const seatMapId = watch('seatMapId');
     const ticketSaleEndDate = watch('ticketSaleEndDate');
 
     // Auto-generate slug when title changes (if not manually edited)
@@ -123,9 +107,9 @@ export const ManageEventDialog = ({
         }
     }, [title, slugEdited, event?.slug, form]);
 
-    // More robust validation using watched values - for free seating, require ticket types OR categories (legacy)
-    const ticketTypesValid = seatType === "free" ? (hasEventTicketTypes || (selectedCategories?.length ?? 0) > 0) : true;
-    const isValidRealTime = title && venueId && ticketTypesValid && (seatType === "seatmap" ? seatMapId : true);
+    // Require ticket types
+    const ticketTypesValid = hasEventTicketTypes;
+    const isValidRealTime = title && venueId && ticketTypesValid;
 
 
     // Check if form has changes
@@ -134,7 +118,6 @@ export const ManageEventDialog = ({
     const watchedDescription = watch('description');
     const watchedBespokeMessage = watch('bespokeMessage');
     const watchedSlug = watch('slug');
-    const watchedSeatType = watch('seatType');
     const watchedVenueId = watch('venueId');
     const watchedPersonalTicket = watch('personalTicket');
     const watchedIsActive = watch('isActive');
@@ -157,10 +140,7 @@ export const ManageEventDialog = ({
             values.description !== event.description ||
             values.bespokeMessage !== (event.bespokeMessage || '') ||
             values.slug !== event.slug ||
-            values.seatType !== event.seatType ||
             values.venueId !== event.venueId?.toString() ||
-            values.seatMapId !== event.seatMapId ||
-            !arrayEquals(originalSelectedCategories ?? [], values.selectedCategories ?? []) ||
             values.personalTicket !== event.personalTicket ||
             values.isActive !== event.isActive ||
             values.startTime !== (event.dates?.[0]?.date ? (() => {
@@ -188,7 +168,6 @@ export const ManageEventDialog = ({
     }, [
         event, 
         form, 
-        originalSelectedCategories, 
         coverImage, 
         removeCoverImage, 
         coverImageSize,
@@ -197,7 +176,6 @@ export const ManageEventDialog = ({
         watchedDescription,
         watchedBespokeMessage,
         watchedSlug,
-        watchedSeatType,
         watchedVenueId,
         watchedPersonalTicket,
         watchedIsActive,
@@ -216,9 +194,9 @@ export const ManageEventDialog = ({
         try {
 
             
-            const ticketTypesValid = values.seatType === "free" ? (hasEventTicketTypes || (values.selectedCategories?.length ?? 0) > 0) : true;
+            const ticketTypesValid = hasEventTicketTypes;
             if (!ticketTypesValid) {
-                showToast.error("Please add at least one ticket type for free seating events");
+                showToast.error("Please add at least one ticket type");
                 return;
             }
 
@@ -227,14 +205,7 @@ export const ManageEventDialog = ({
                 description: values.description,
                 bespokeMessage: values.bespokeMessage,
                 slug: values.slug,
-                seatType: values.seatType,
                 venueId: values.venueId,
-                seatMapId: values.seatMapId,
-                categories: values.selectedCategories ?? [],  // API expects 'categories'
-                maxAmounts: (values.selectedCategories ?? []).reduce((acc: Record<string, number>, categoryId) => {
-                    const category = categories.find(c => c.id === parseInt(String(categoryId)));
-                    return { ...acc, [String(categoryId)]: category?.price || 0 };
-                }, {}),
                 personalTicket: values.personalTicket,
                 isActive: values.isActive,
                 customFields: values.customFields,
@@ -412,10 +383,7 @@ export const ManageEventDialog = ({
             setValue("slug", event.slug || generateSlug(event.title));
             setValue("description", event.description);
             setValue("bespokeMessage", event.bespokeMessage || "");
-            setValue("seatType", event.seatType);
             setValue("venueId", event.venueId ? event.venueId.toString() : "");
-            setValue("seatMapId", event.seatMapId);
-            setValue("selectedCategories", originalSelectedCategories);
             setValue("personalTicket", event.personalTicket);
             setValue("isActive", event.isActive ?? true);
             setValue("customFields", event.customFields || []);
@@ -456,7 +424,7 @@ export const ManageEventDialog = ({
             setCoverImage(null);  // Reset cover image when creating new event
             setRemoveCoverImage(false);
         }
-    }, [event, originalSelectedCategories, setValue, reset, form]);
+    }, [event, setValue, reset, form]);
 
     const coverImageUrl = !removeCoverImage && (coverImage ? URL.createObjectURL(coverImage) : event?.coverImage);
 
@@ -585,17 +553,6 @@ export const ManageEventDialog = ({
                                 </div>
 
                                 <Select
-                                    label="Seat Map Type"
-                                    value={seatType}
-                                    onChange={(value) => setValue("seatType", value as "free" | "seatmap")}
-                                    options={[
-                                        { value: "free", label: "Free" },
-                                        { value: "seatmap", label: "Seat map" }
-                                    ]}
-                                    placeholder="Select seat map type"
-                                />
-                                
-                                <Select
                                     label="Venue"
                                     value={watch('venueId')?.toString() || ""}
                                     onChange={(value) => setValue("venueId", value)}
@@ -683,44 +640,6 @@ export const ManageEventDialog = ({
                                     </div>
                                 </div>
 
-                                {seatType === "seatmap" && (
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                        <div>
-                                            <Select
-                                                label="Seat Map"
-                                                value={watch('seatMapId')?.toString() || ""}
-                                                onChange={(value) => setValue("seatMapId", parseInt(value))}
-                                                options={seatmaps.map((seatMap) => ({
-                                                    value: seatMap.id.toString(),
-                                                    label: seatMap.id.toString()
-                                                }))}
-                                                placeholder="Select seat map"
-                                            />
-                                            {errors.seatMapId && (
-                                                <p className="text-sm text-red-600 mt-1">{errors.seatMapId.message}</p>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center justify-center">
-                                            <Button
-                                                type="button"
-                                                onClick={() => setOpenPreview(true)}
-                                                disabled={(() => {
-                                                    const seatMapId = watch('seatMapId');
-                                                    if (!seatMapId) return true;
-                                                    if (typeof seatMapId === 'string') return parseInt(seatMapId) <= 0;
-                                                    return seatMapId <= 0;
-                                                })()}
-                                                variant="outline"
-                                                className="w-full"
-                                            >
-                                                Preview
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-
-
-
                                 <div className="flex items-center space-x-3">
                                     <Switch
                                         checked={watch('personalTicket')}
@@ -760,7 +679,7 @@ export const ManageEventDialog = ({
                                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     />
                                     <p className="text-sm text-gray-500 mt-1">
-                                        Maximum total tickets that can be sold across all categories
+                                        Maximum total tickets that can be sold across all ticket types
                                     </p>
                                     {errors.eventDateTicketLimit && (
                                         <p className="text-sm text-red-600 mt-1">{errors.eventDateTicketLimit.message}</p>
@@ -1013,16 +932,6 @@ export const ManageEventDialog = ({
                 </Dialog.Body>
             </Dialog>
 
-            <SeatMapDialog
-                categories={categories}
-                onChange={() => setOpenPreview(false)}
-                onClose={() => setOpenPreview(false)}
-                seatmap={
-                    openPreview ? seatmaps.find((x) => x.id === watch('seatMapId')) : null
-                }
-                currency={currency}
-            />
-            
             <ConfirmDialog
                 open={deleteOpen}
                 onConfirm={() => {

@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
-import { getAdminServerSideProps } from '../../../../../../constants/serverUtil';
+import { CAPACITY_RESERVED_STATUSES_ARRAY } from '../../../../../../constants/orderStatuses';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method === 'GET') {
@@ -12,12 +12,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 return res.status(400).json({ error: 'Invalid event ID' });
             }
 
+            // Fetch ticket types
             const ticketTypes = await prisma.eventTicketType.findMany({
                 where: { eventId: eventIdNum },
-                orderBy: { sortOrder: 'asc' }
+                orderBy: { sortOrder: 'asc' },
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    price: true,
+                    currency: true,
+                    capacity: true,
+                    isActive: true,
+                    isPublic: true,
+                    sortOrder: true,
+                    publicSortOrder: true,
+                    colorHex: true
+                }
             });
 
-            return res.status(200).json(ticketTypes);
+            // Compute sold counts from Ticket rows (not from deprecated sold column)
+            const soldCounts = await prisma.ticket.groupBy({
+                by: ['eventTicketTypeId'],
+                where: {
+                    eventTicketTypeId: { in: ticketTypes.map(tt => tt.id) },
+                    order: {
+                        status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+                    }
+                },
+                _count: { id: true }
+            });
+
+            const soldMap = new Map(soldCounts.map(s => [s.eventTicketTypeId, s._count.id]));
+
+            // Return ticket types with computed sold values
+            const ticketTypesWithSold = ticketTypes.map(tt => ({
+                ...tt,
+                sold: soldMap.get(tt.id) || 0
+            }));
+
+            return res.status(200).json(ticketTypesWithSold);
         } catch (error) {
             console.error('Error fetching ticket types:', error);
             return res.status(500).json({ error: 'Failed to fetch ticket types' });
@@ -54,7 +88,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 }
             });
 
-            return res.status(201).json(newTicketType);
+            // Return with sold: 0 (new ticket type has no sales)
+            return res.status(201).json({ ...newTicketType, sold: 0 });
         } catch (error) {
             console.error('Error creating ticket type:', error);
             return res.status(500).json({ error: 'Failed to create ticket type' });

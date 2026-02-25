@@ -7,10 +7,10 @@ import TicketPicker from '../../components/TicketPicker';
 import { formatInTZ } from '../../utils/datetime';
 import Navbar from '../../components/booking/Navbar';
 import Footer from '../../components/booking/Footer';
-import { SeatSelectionFactory } from '../../components/seatselection/SeatSelectionFactory';
 import { UnifiedBookingPage } from '../../components/booking/UnifiedBookingPage';
 import { getOption } from '../../lib/options';
 import { Options } from '../../constants/Constants';
+import { computeAvailability } from '../../lib/services/ticketing/availability';
 
 interface Event {
   id: number;
@@ -18,9 +18,6 @@ interface Event {
   description?: string;
   slug?: string;
   coverImage?: string;
-  seatType?: string;
-  seatMapId?: number;
-  seatMap?: any;
   venue?: {
     name?: string;
     address?: string;
@@ -28,8 +25,7 @@ interface Event {
     postcode?: string;
   };
   dates: EventDate[];
-  categories: any[];
-  ticketTypes?: any[];
+  ticketTypes: any[];
 }
 
 interface EventDate {
@@ -225,7 +221,7 @@ export default function EventPage({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <UnifiedBookingPage
             event={event}
-            categories={event.categories}
+            ticketTypes={event.ticketTypes}
             paymentMethods={paymentMethods}
             deliveryMethods={deliveryMethods}
             shippingFees={shippingFees}
@@ -262,7 +258,6 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
       },
       include: {
         venue: true,
-        seatMap: true,
         customFields: true,
         ticketTypes: {
           where: {
@@ -295,7 +290,6 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
         },
         include: {
           venue: true,
-          seatMap: true,
           customFields: true,
           ticketTypes: {
             where: {
@@ -327,57 +321,32 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
     // Get the next upcoming event date
     const eventDate = event.dates && event.dates.length > 0 ? event.dates[0] : null;
 
-    // Check global ticket limit for this event date
-    let globalLimitReached = false;
-    let globalAvailable = Infinity;
+    // Use canonical availability service for capacity calculations
+    let availability = null;
+    let isSoldOut = false;
     
-    if (eventDate?.totalTicketLimit !== null && eventDate?.totalTicketLimit !== undefined) {
-      // Count ALL tickets sold for this event date (across all ticket types)
-      // Include PARTIALLY_REFUNDED as those tickets are still valid
-      const totalSold = await prisma.ticket.count({
-        where: {
-          order: {
-            eventDateId: eventDate.id,
-            status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED'] }
-          }
-        }
-      });
-      
-      globalAvailable = Math.max(0, eventDate.totalTicketLimit - totalSold);
-      globalLimitReached = globalAvailable === 0;
+    if (eventDate) {
+      availability = await computeAvailability(eventDate.id);
+      isSoldOut = availability.totalAvailable !== null && availability.totalAvailable === 0;
     }
 
     // Transform event ticket types to the format expected by UnifiedBookingPage
-    const transformedCategories = event.ticketTypes.map(ticketType => {
-      const capacity = ticketType.capacity;
-      const sold = ticketType.sold || 0;
-      
-      // Individual ticket type availability
-      let available = capacity === null ? 999999 : Math.max(0, capacity - sold);
-      
-      // Cap by global limit if set
-      if (globalAvailable !== Infinity) {
-        available = Math.min(available, globalAvailable);
-      }
-      
-      return {
-        id: ticketType.id,
-        name: ticketType.name,
-        price: ticketType.price / 100, // Convert from pence to pounds
-        maxAmount: ticketType.maxTicketsPerOrder || 10, // Use ticket type limit or default
-        color: '#4F46E5', // Default color for ticket types
-        description: ticketType.description,
-        capacity,
-        sold,
-        available
-      };
-    });
+    const transformedTicketTypes = availability?.ticketTypes.map(tt => ({
+      id: tt.eventTicketTypeId,
+      name: tt.name,
+      price: tt.price / 100, // Convert from pence to pounds
+      maxAmount: 10, // Default max per order
+      color: '#4F46E5', // Default color for ticket types
+      description: event.ticketTypes.find(t => t.id === tt.eventTicketTypeId)?.description,
+      capacity: tt.capacity,
+      sold: tt.sold,
+      available: tt.available ?? 999999
+    })) || [];
     
-    // Check if event is sold out:
-    // 1. Global limit reached, OR
-    // 2. All individual ticket types have no availability
-    const isSoldOut = globalLimitReached || 
-      (transformedCategories.length > 0 && transformedCategories.every(cat => cat.available === 0));
+    // Event is sold out if no availability or all ticket types have no availability
+    if (!isSoldOut) {
+      isSoldOut = transformedTicketTypes.length > 0 && transformedTicketTypes.every(tt => tt.available === 0);
+    }
 
     return {
       props: {
@@ -397,7 +366,7 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
           description: event.description,
           personalTicket: event.personalTicket || false,
           customFields: event.customFields || [],
-          categories: transformedCategories,
+          ticketTypes: transformedTicketTypes,
           dates: event.dates ? event.dates.map(date => ({
             id: date.id,
             title: date.title,
@@ -415,7 +384,7 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
           ticketSaleStartDate: eventDate.ticketSaleStartDate?.toISOString() || null,
           ticketSaleEndDate: eventDate.ticketSaleEndDate?.toISOString() || null
         } : null,
-        categories: transformedCategories,
+        ticketTypes: transformedTicketTypes,
         paymentMethods: await getOption(Options.PaymentProviders),
         deliveryMethods: await getOption(Options.Delivery),
         shippingFees: await getOption(Options.PaymentFeesShipping),

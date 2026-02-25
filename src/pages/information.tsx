@@ -170,7 +170,7 @@ export default function Information({ deliveryMethods, categories, events, shipp
                                 <div className="w-5 h-5 text-gray-400 group-open:rotate-180 transition-transform">▼</div>
                             </summary>
                             <div className="px-4 pb-4 border-t border-gray-200">
-                                <TicketNames categories={categories} />
+                                <TicketNames ticketTypes={categories} />
                                 <Button
                                     onClick={() => setExpanded(2)}
                                     className="w-full"
@@ -219,10 +219,30 @@ export default function Information({ deliveryMethods, categories, events, shipp
 
 export async function getStaticProps({ locale }) {
     const deliveryMethods = await getOption(Options.Delivery);
+    
+    // Get all ticket types to use as categories
+    const ticketTypes = await prisma.eventTicketType.findMany({
+        where: { isActive: true },
+        select: {
+            id: true,
+            name: true,
+            price: true,
+            colorHex: true
+        }
+    });
+    
+    // Transform ticket types to categories format for compatibility
+    const categories = ticketTypes.map(tt => ({
+        id: tt.id,
+        label: tt.name,
+        price: tt.price / 100,
+        color: tt.colorHex || '#4F46E5'
+    }));
+    
     return {
         props: {
             deliveryMethods,
-            categories: await prisma.category.findMany(),
+            categories,
             events: await prisma.event.findMany({
                 select: {
                     personalTicket: true,

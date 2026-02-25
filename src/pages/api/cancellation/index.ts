@@ -20,13 +20,12 @@ export default async function handler(
                     id: true,
                     firstName: true,
                     lastName: true,
-                    category: {
+                    eventTicketType: {
                         select: {
-                            label: true,
+                            name: true,
                             price: true
                         }
-                    },
-                    seatId: true
+                    }
                 }
             },
             cancellationSecret: true

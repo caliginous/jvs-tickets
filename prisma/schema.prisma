@@ -11,8 +11,6 @@ datasource db {
 model Event {
   id             Int                  @id @default(autoincrement())
   title          String
-  seatType       String
-  seatMapId      Int?
   coverImage     String?
   coverImageSize Int?
   personalTicket Boolean              @default(false)
@@ -21,9 +19,7 @@ model Event {
   bespokeMessage String?
   isActive       Boolean              @default(true)
   slug           String?              @unique
-  categories     CategoriesOnEvents[]
   customFields   CustomField[]
-  seatMap        SeatMap?             @relation(fields: [seatMapId], references: [id])
   venue          Venue?               @relation(fields: [venueId], references: [id])
   dates          EventDate[]
   ticketTypes    EventTicketType[]
@@ -57,16 +53,15 @@ model EventTicketType {
 }
 
 model EventDate {
-  id                  Int               @id @default(autoincrement())
+  id                  Int      @id @default(autoincrement())
   title               String?
   eventId             Int
   date                DateTime?
   totalTicketLimit    Int?
   ticketSaleStartDate DateTime?
   ticketSaleEndDate   DateTime?
-  event               Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event               Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   orders              Order[]
-  seatReservations    SeatReservation[]
 }
 
 model CustomField {
@@ -78,35 +73,6 @@ model CustomField {
   event      Event   @relation(fields: [eventId], references: [id])
 }
 
-model SeatMap {
-  id          Int     @id @default(autoincrement())
-  definition  String
-  preview     Bytes?
-  previewType String?
-  events      Event[]
-  orders      Order[]
-}
-
-model Category {
-  id            Int                  @id @default(autoincrement())
-  label         String
-  price         Float
-  color         String?
-  activeColor   String?
-  occupiedColor String?
-  events        CategoriesOnEvents[]
-  tickets       Ticket[]
-}
-
-model CategoriesOnEvents {
-  eventId    Int
-  categoryId Int
-  maxAmount  Int?
-  category   Category @relation(fields: [categoryId], references: [id])
-  event      Event    @relation(fields: [eventId], references: [id])
-
-  @@id([eventId, categoryId])
-}
 
 model User {
   id           String  @id @default(uuid())
@@ -130,7 +96,6 @@ model Order {
   paymentIntent      String?
   paymentResult      String?
   status             String        @default("PENDING")
-  seatMapId          Int?
   eventDateId        Int
   shipping           String
   locale             String
@@ -152,7 +117,6 @@ model Order {
   customFields       String?       // JSON string of custom field responses for this order
   discountCode       DiscountCode? @relation(fields: [discountCodeId], references: [id])
   eventDate          EventDate     @relation(fields: [eventDateId], references: [id], onDelete: Cascade)
-  seatMap            SeatMap?      @relation(fields: [seatMapId], references: [id])
   user               User          @relation(fields: [userId], references: [id])
   orderItems         OrderItem[]
   task               Task?
@@ -180,24 +144,11 @@ model OrderItem {
   @@index([eventTicketTypeId])
 }
 
-model SeatReservation {
-  id            String    @id @default(uuid())
-  reservationId String
-  seatId        Int?
-  categoryId    Int
-  amount        Int       @default(1)
-  expiresAt     DateTime
-  eventDateId   Int
-  eventDate     EventDate @relation(fields: [eventDateId], references: [id], onDelete: Cascade)
-}
-
 model Ticket {
   id                String           @id @default(uuid())
   orderId           String
   used              Boolean          @default(false)
-  seatId            Int?
   secret            String?
-  categoryId        Int?
   amount            Int              @default(1)
   firstName         String?
   lastName          String?
@@ -206,12 +157,10 @@ model Ticket {
   feeCharged        Int              @default(0)
   priceCharged      Int?
   taxCharged        Int              @default(0)
-  category          Category?        @relation(fields: [categoryId], references: [id])
   eventTicketType   EventTicketType? @relation(fields: [eventTicketTypeId], references: [id])
   order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
-  @@index([categoryId])
   @@index([eventTicketTypeId])
   @@index([secret])
   @@index([used])
@@ -285,7 +234,6 @@ model DiscountCode {
   currentUsage        Int       @default(0)
   isActive            Boolean   @default(true)
   appliesToEvents     String[]
-  appliesToCategories String[]
   minimumOrderValue   Float?
   maximumDiscount     Float?
   createdById         Int

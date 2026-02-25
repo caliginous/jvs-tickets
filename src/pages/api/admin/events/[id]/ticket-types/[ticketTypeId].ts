@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
+import { CAPACITY_RESERVED_STATUSES_ARRAY } from '../../../../../../constants/orderStatuses';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     const { id: eventId, ticketTypeId } = req.query;
@@ -16,6 +17,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 where: {
                     id: ticketTypeIdNum,
                     eventId: eventIdNum
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    price: true,
+                    currency: true,
+                    capacity: true,
+                    isActive: true,
+                    isPublic: true,
+                    sortOrder: true,
+                    publicSortOrder: true,
+                    colorHex: true
                 }
             });
 
@@ -23,7 +37,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 return res.status(404).json({ error: 'Ticket type not found' });
             }
 
-            return res.status(200).json(ticketType);
+            // Compute sold count from Ticket rows (not from deprecated sold column)
+            const soldCount = await prisma.ticket.count({
+                where: {
+                    eventTicketTypeId: ticketTypeIdNum,
+                    order: {
+                        status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+                    }
+                }
+            });
+
+            return res.status(200).json({ ...ticketType, sold: soldCount });
         } catch (error) {
             console.error('Error fetching ticket type:', {
                 error: error instanceof Error ? error.message : 'Unknown error',
@@ -81,10 +105,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     colorHex,
                     isActive: Boolean(isActive),
                     sortOrder: sortOrder ? parseInt(sortOrder) : undefined
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    price: true,
+                    currency: true,
+                    capacity: true,
+                    isActive: true,
+                    isPublic: true,
+                    sortOrder: true,
+                    publicSortOrder: true,
+                    colorHex: true
                 }
             });
 
-            return res.status(200).json(updatedTicketType);
+            // Compute sold count from Ticket rows
+            const soldCount = await prisma.ticket.count({
+                where: {
+                    eventTicketTypeId: ticketTypeIdNum,
+                    order: {
+                        status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+                    }
+                }
+            });
+
+            return res.status(200).json({ ...updatedTicketType, sold: soldCount });
         } catch (error) {
             console.error('Error updating ticket type:', {
                 error: error instanceof Error ? error.message : 'Unknown error',

@@ -59,7 +59,6 @@ export default async function handler(
         usageLimit,
         isActive,
         appliesToEvents,
-        appliesToCategories,
         minimumOrderValue,
         maximumDiscount
       } = req.body;
@@ -99,7 +98,6 @@ export default async function handler(
           usageLimit: usageLimit ? parseInt(usageLimit) : null,
           isActive,
           appliesToEvents: (appliesToEvents || []).map(String).filter((v) => v && v.trim() !== ''), // Convert to strings and drop empties
-          appliesToCategories: (appliesToCategories || []).map(String).filter((v) => v && v.trim() !== ''), // Convert to strings and drop empties
           minimumOrderValue: minimumOrderValue ? parseFloat(minimumOrderValue) : null,
           maximumDiscount: maximumDiscount ? parseFloat(maximumDiscount) : null,
           createdById: dbUser.id

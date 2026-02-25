@@ -17,12 +17,6 @@ export const ManageEventSchema = z.object({
   bespokeMessage: z.string().max(1200, 'Bespoke message must be under 200 words (1200 characters)').optional(),
   venueId: z.union([z.string(), z.number()]).optional().transform(val => val === "" ? undefined : val),
 
-  // Seat map configuration
-  seatType: z.enum(['free', 'seatmap']),
-  seatMapId: z.union([z.string(), z.number(), z.null()]).optional().transform(val => {
-    if (val === "" || val === null || val === undefined) return undefined;
-    return val;
-  }),
   personalTicket: z.boolean(),
 
   // Schedule
@@ -38,9 +32,6 @@ export const ManageEventSchema = z.object({
     return isNaN(num) ? undefined : num;
   }),
   ticketSaleEndDate: z.string().optional(),
-
-  // Categories (for free seating)
-  selectedCategories: z.array(z.union([z.string(), z.number(), z.object({})])).default([]),
 
   // Custom fields
   customFields: z.array(z.object({
@@ -81,31 +72,11 @@ export const ManageEventSchema = z.object({
   message: 'End time must be after start time',
   path: ['endTime']
 }).refine((data) => {
-  // Validate seat map selection for seatmap type
-  if (data.seatType === 'seatmap') {
-    const seatMapId = typeof data.seatMapId === 'string' ? parseInt(data.seatMapId) : data.seatMapId;
-    if (!seatMapId || seatMapId <= 0) {
-      return false;
-    }
-  }
-  return true;
+  // Require ticket types
+  return data.ticketTypesChanged === true;
 }, {
-  message: 'Seat map is required for seatmap type events',
-  path: ['seatMapId']
-}).refine((data) => {
-  // For free seating events, require either categories (legacy) OR ticket types (new system)
-  if (data.seatType === 'free') {
-    const hasCategories = Array.isArray(data.selectedCategories) && data.selectedCategories.length > 0;
-    const hasTicketTypes = data.ticketTypesChanged; // This indicates ticket types are being used
-    
-    if (!hasCategories && !hasTicketTypes) {
-      return false;
-    }
-  }
-  return true;
-}, {
-  message: 'Add at least one ticket type for free seating events',
-  path: ['selectedCategories'] // Keep the path for UI purposes, but message is about ticket types
+  message: 'Add at least one ticket type',
+  path: ['ticketTypesChanged']
 });
 
 export type ManageEventValues = z.infer<typeof ManageEventSchema>;
@@ -117,18 +88,15 @@ export const defaultManageEventValues: ManageEventValues = {
   slug: '',
   description: '',
   bespokeMessage: '',
-  venueId: '1', // Default to first venue
+  venueId: '1',
 
-  seatType: 'free',
-  seatMapId: undefined,
   personalTicket: false,
   startTime: '19:00',
   endTime: '21:00',
   timezone: 'Europe/London',
-  eventDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0], // tomorrow
-  eventDateTicketLimit: 10, // Default to 10 tickets
+  eventDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+  eventDateTicketLimit: 10,
   ticketSaleEndDate: undefined,
-  selectedCategories: [], // Start with no categories selected
   customFields: [],
   status: 'draft',
   isActive: true,

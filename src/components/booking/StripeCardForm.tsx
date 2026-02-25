@@ -54,10 +54,10 @@ export default function StripeCardForm({ onSuccess, eventDateId, eventName, even
         },
         body: JSON.stringify({
           tickets: order.tickets.map(ticket => ({
-            categoryId: ticket.categoryId,
+            ticketTypeId: ticket.ticketTypeId,
             amount: ticket.amount,
             price: Math.round(ticket.price * 100), // Convert pounds back to pence for Stripe
-            name: `Ticket ${ticket.categoryId}`, // You might want to get the actual category name
+            name: (ticket as any).ticketTypeName || (ticket as any).name || `Ticket ${ticket.ticketTypeId}`,
           })),
           eventDateId: eventDateId,
           eventName: eventName,
@@ -107,10 +107,10 @@ export default function StripeCardForm({ onSuccess, eventDateId, eventName, even
           },
           body: JSON.stringify({
             tickets: order.tickets.map(ticket => ({
-              categoryId: ticket.categoryId,
+              ticketTypeId: ticket.ticketTypeId,
               amount: ticket.amount,
               price: 0, // Free due to discount
-              name: (ticket as any).categoryName || `Ticket ${ticket.categoryId}`
+              name: (ticket as any).ticketTypeName || (ticket as any).name || `Ticket ${ticket.ticketTypeId}`
             })),
             eventDateId: eventDateId,
             eventName: eventName,

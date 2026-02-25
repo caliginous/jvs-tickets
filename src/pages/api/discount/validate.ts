@@ -10,7 +10,7 @@ export default async function handler(
   }
 
   try {
-    const { code, eventId, categoryIds, orderTotal } = req.body;
+    const { code, eventId, orderTotal } = req.body;
 
     if (!code) {
       return res.status(400).json({ error: "Discount code is required" });
@@ -52,9 +52,8 @@ export default async function handler(
       });
     }
 
-    // Sanitize applies lists to avoid stray empty values
+    // Sanitize applies lists to avoid stray empty values (appliesToCategories removed - Category deprecated)
     const appliesToEvents = (discountCode.appliesToEvents || []).filter((v) => v && v.trim() !== '');
-    const appliesToCategories = (discountCode.appliesToCategories || []).filter((v) => v && v.trim() !== '');
 
     // Check if code applies to specific events
     if (appliesToEvents.length > 0 && eventId) {
@@ -81,16 +80,6 @@ export default async function handler(
 
       if (!applies) {
         return res.status(400).json({ error: "Discount code does not apply to this event" });
-      }
-    }
-
-    // Check if code applies to specific categories
-    if (appliesToCategories.length > 0 && categoryIds && categoryIds.length > 0) {
-      const hasValidCategory = categoryIds.some(catId => 
-        appliesToCategories.includes(catId.toString())
-      );
-      if (!hasValidCategory) {
-        return res.status(400).json({ error: "Discount code does not apply to selected categories" });
       }
     }
 

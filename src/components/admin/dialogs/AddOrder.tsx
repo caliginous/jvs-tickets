@@ -7,11 +7,10 @@ import {
     resetPersonalInformation,
     setAddress,
     setEmail,
-    setShipping, setUserId
+    setShipping
 } from "../../../store/reducers/personalInformationReducer";
 import { AddressComponentLazy } from "../../form/AddressComponentLazy";
 import { useAppDispatch, useAppSelector } from "../../../store/hooks";
-import { SeatSelectionFactory } from "../../seatselection/SeatSelectionFactory";
 import { ShippingFactory, ShippingType } from "../../../store/factories/shipping/ShippingFactory";
 import { CheckboxAccordion } from "../../CheckboxAccordion";
 import informationText from "../../../../locale/en/information.json";
@@ -21,10 +20,9 @@ import { PaymentMethods } from "../../payment/PaymentMethods";
 import { resetEvent, setEvent } from "../../../store/reducers/eventSelectionReducer";
 import { showToast } from "../../../ui";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { resetOrder, setOrderId } from "../../../store/reducers/orderReducer";
-import { resetPayment, setGtcAccepted, setPaymentStatus } from "../../../store/reducers/paymentReducer";
+import { resetOrder } from "../../../store/reducers/orderReducer";
+import { resetPayment, setGtcAccepted } from "../../../store/reducers/paymentReducer";
 import { XIcon, ChevronDownIcon } from "@heroicons/react/solid";
-import axios from "axios";
 
 interface props {
     open: boolean;
@@ -58,21 +56,11 @@ const AddOrderInner = ({open, events, eventDates, categories, onClose, onAdd, pa
     }, [selector.payment]);
 
     const storeOrder = async () => {
-        try {
-            console.log("TEST");
-            const response = await axios.post("/api/admin/order/store", {
-                order: selector.order,
-                user: selector.personalInformation,
-                eventDateId: selector.selectedEvent.selectedEvent,
-                paymentType: selector.payment.payment.type,
-                locale: navigator.language
-            });
-            dispatch(setUserId(response.data.userId));
-            dispatch(setOrderId(response.data.orderId));
-            dispatch(setPaymentStatus("initiate"));
-        } catch (e) {
-            showToast.error("Error: " + e.message);
-        }
+        // This legacy endpoint is deprecated
+        showToast.error(
+            "This order creation method is deprecated. Please use the 'Create Order' button " +
+            "on the Orders page instead, which supports the modern ticket type system."
+        );
     };
 
     const handleCloseConfirmation = () => {
@@ -128,15 +116,14 @@ const AddOrderInner = ({open, events, eventDates, categories, onClose, onAdd, pa
                                     <div className="space-y-4">
                                         <EventSelection events={events} onChange={(id) => dispatch(setEvent(id))} />
                                         {event && (
-                                            <SeatSelectionFactory
-                                                categories={categories[selector.selectedEvent.selectedEvent]}
-                                                seatType={event.seatType}
-                                                seatSelectionDefinition={event.seatMap?.definition}
-                                                noWrap
-                                                hideSummary
-                                                currency={currency}
-                                                noReservation
-                                            />
+                                            <div className="p-4 bg-gray-50 rounded-md">
+                                                <p className="text-sm text-gray-600">
+                                                    Selected event: {event.event?.title || 'Unknown event'}
+                                                </p>
+                                                <p className="text-xs text-gray-500 mt-2">
+                                                    To add orders with ticket types, please use the Create Order modal instead.
+                                                </p>
+                                            </div>
                                         )}
                                     </div>
                                 </div>

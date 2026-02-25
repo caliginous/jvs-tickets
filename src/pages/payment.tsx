@@ -52,8 +52,8 @@ export default function Payment({ categories, paymentMethods, paymentFees, shipp
         setEventTitle(getEventTitle(events.find(e => e.id === selectedEventId)));
     }, [events, selectedEventId]);
 
-    const openSeatSelectionPage = () => {
-        router.push("/seatselection/" + selectedEventId + "?event=" + selectedEventId).catch(console.log);
+    const openBookingPage = () => {
+        router.push("/booking/" + selectedEventId).catch(console.log);
     };
 
     return (
@@ -113,7 +113,7 @@ export default function Payment({ categories, paymentMethods, paymentFees, shipp
                             categories={categories}
                             hideEmptyCategories
                             withEditButton
-                            onEdit={openSeatSelectionPage}
+                            onEdit={openBookingPage}
                             paymentFees={paymentFees}
                             shippingFees={shippingFees}
                             eventName={eventTitle}
@@ -130,7 +130,25 @@ export default function Payment({ categories, paymentMethods, paymentFees, shipp
 }
 
 export async function getStaticProps({ locale }) {
-    const categories = await prisma.category.findMany();
+    // Get all ticket types to use as categories
+    const ticketTypes = await prisma.eventTicketType.findMany({
+        where: { isActive: true },
+        select: {
+            id: true,
+            name: true,
+            price: true,
+            colorHex: true
+        }
+    });
+    
+    // Transform ticket types to categories format for compatibility
+    const categories = ticketTypes.map(tt => ({
+        id: tt.id,
+        label: tt.name,
+        price: tt.price / 100,
+        color: tt.colorHex || '#4F46E5'
+    }));
+    
     const paymentMethods = await getOption(Options.PaymentProviders);
     const events = await prisma.eventDate.findMany({
         select: {

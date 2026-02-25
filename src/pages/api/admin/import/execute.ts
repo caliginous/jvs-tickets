@@ -96,7 +96,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     event = await prisma.event.create({
                             data: {
                                 title: eventTitle,
-                                seatType: 'free',
                                 isActive: false, // Historic events are inactive
                                 description: `Imported from CiviCRM on ${new Date().toISOString()}`,
                                 personalTicket: false,
@@ -259,11 +258,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                                     }
                             });
                             
-                            // Update sold count
-                            await prisma.eventTicketType.update({
-                                where: { id: ticketType.id },
-                                data: { sold: { increment: 1 } }
-                            });
+                            // NOTE: EventTicketType.sold is deprecated and no longer updated.
+                            // Availability is computed dynamically from Ticket rows.
                             
                             stats.ticketsCreated++;
                         }

@@ -297,7 +297,6 @@ export async function getStaticProps({ locale }) {
                 title: true,
                 description: true,
                 coverImage: true,
-                seatType: true,
                 slug: true,
                 dates: {
                     select: {
@@ -326,20 +325,8 @@ export async function getStaticProps({ locale }) {
                         name: true,
                         price: true,
                         capacity: true,
-                        sold: true
-                    }
-                },
-                categories: {
-                    select: {
-                        category: {
-                            select: {
-                                id: true,
-                                label: true,
-                                price: true,
-                                color: true
-                            }
-                        },
-                        maxAmount: true
+                        sold: true,
+                        colorHex: true
                     }
                 }
             }
@@ -356,26 +343,13 @@ export async function getStaticProps({ locale }) {
                     ticketSaleEndDate: date.ticketSaleEndDate?.toISOString() ?? null
                 }));
             
-            // Process pricing information - prioritize ticketTypes over categories
-            let categories = [];
-            
-            if (event.ticketTypes && event.ticketTypes.length > 0) {
-                // Use modern ticket types system
-                categories = event.ticketTypes.map(tt => ({
-                    id: tt.id,
-                    name: tt.name,
-                    price: tt.price / 100, // Convert from pence to pounds
-                    color: '#4F46E5' // Default color for ticket types
-                }));
-            } else if (event.categories && event.categories.length > 0) {
-                // Fall back to legacy categories system
-                categories = event.categories.map(cat => ({
-                    id: cat.category.id,
-                    name: cat.category.label,
-                    price: cat.category.price,
-                    color: cat.category.color || '#4F46E5'
-                }));
-            }
+            // Process pricing information from ticket types
+            const categories = event.ticketTypes.map(tt => ({
+                id: tt.id,
+                name: tt.name,
+                price: tt.price / 100, // Convert from pence to pounds
+                color: tt.colorHex || '#4F46E5'
+            }));
             
             return {
                 ...event,

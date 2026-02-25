@@ -5,16 +5,16 @@ import useTranslation from "next-translate/useTranslation";
 import { Input } from "../ui";
 
 interface TicketNamesProps {
-    categories: any[];
+    ticketTypes: any[];
 }
 
-export const TicketNames = ({ categories }: TicketNamesProps) => {
+export const TicketNames = ({ ticketTypes }: TicketNamesProps) => {
     const order = useAppSelector(selectOrder);
 
     return (
         <div className="space-y-4">
             {order.tickets.map((ticket: Ticket, index) => (
-                <TicketNameItem key={index} index={index} categories={categories} />
+                <TicketNameItem key={index} index={index} ticketTypes={ticketTypes} />
             ))}
         </div>
     );
@@ -22,10 +22,10 @@ export const TicketNames = ({ categories }: TicketNamesProps) => {
 
 interface TicketNameItemProps {
     index: number;
-    categories: any[];
+    ticketTypes: any[];
 }
 
-const TicketNameItem = ({ index, categories }: TicketNameItemProps) => {
+const TicketNameItem = ({ index, ticketTypes }: TicketNameItemProps) => {
     const { t } = useTranslation();
     const order = useAppSelector(selectOrder);
     const dispatch = useAppDispatch();
@@ -35,8 +35,8 @@ const TicketNameItem = ({ index, categories }: TicketNameItemProps) => {
         dispatch(setter({ index, [key]: event.target.value }));
     };
 
-    const resolveCategory = (id: number) => {
-        return categories.find(category => category.id === id);
+    const resolveTicketType = (id: number) => {
+        return ticketTypes.find(ticketType => ticketType.id === id);
     };
 
     return (
@@ -46,13 +46,8 @@ const TicketNameItem = ({ index, categories }: TicketNameItemProps) => {
                 <div className="flex-1 space-y-3">
                     <div>
                         <div className="text-sm font-medium text-gray-900">
-                            {(index + 1) + ". " + resolveCategory(ticket.categoryId)?.label}
+                            {(index + 1) + ". " + (resolveTicketType(ticket.ticketTypeId)?.name || resolveTicketType(ticket.ticketTypeId)?.label || 'Ticket')}
                         </div>
-                        {ticket.seatId && (
-                            <div className="text-sm text-gray-500">
-                                {t("information:seat", { seat: ticket.seatId })}
-                            </div>
-                        )}
                     </div>
                     
                     <Input

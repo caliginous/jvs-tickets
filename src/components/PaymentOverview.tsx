@@ -11,7 +11,8 @@ interface PaymentOverviewProps {
     categories: Array<{
         id: number;
         price: number;
-        label: string;
+        label?: string;
+        name?: string;
         color?: string;
     }>;
     withEditButton?: boolean;
@@ -59,10 +60,11 @@ export const PaymentOverview = ({
             
             <div className="divide-y divide-gray-200">
                 {items.map((item, index) => {
-                    const category = categories.find(
-                        (cat) => cat.id === item.categoryId
+                    const ticketType = categories.find(
+                        (tt) => tt.id === item.ticketTypeId
                     );
-                    if (!category) return null;
+                    if (!ticketType) return null;
+                    const displayLabel = ticketType.label || ticketType.name || 'Ticket';
                     return (
                         <div
                             key={index}
@@ -71,22 +73,22 @@ export const PaymentOverview = ({
                             <div className="flex-1">
                                 <div className="flex items-center justify-between">
                                     <span 
-                                        id={`payment-overview-category-amount-${category.label}`}
+                                        id={`payment-overview-category-amount-${displayLabel}`}
                                         className="text-sm font-medium text-gray-900"
                                     >
-                                        {item.amount}x: {category.label}
+                                        {item.amount}x: {displayLabel}
                                     </span>
                                     {displayColor && (
                                         <div
                                             className="w-5 h-5 rounded-full float-right"
                                             style={{
-                                                backgroundColor: category.color ?? "#59bb59"
+                                                backgroundColor: ticketType.color ?? "#59bb59"
                                             }}
                                         />
                                     )}
                                 </div>
                                 <div className="text-sm text-gray-500 mt-1">
-                                    {formatPrice(category.price, payment.currency)}
+                                    {formatPrice(ticketType.price, payment.currency)}
                                 </div>
                             </div>
                             

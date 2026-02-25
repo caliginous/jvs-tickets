@@ -1,5 +1,5 @@
 import prisma from "./prisma";
-import { calculateTotalPrice, getEventTitle, getServiceFeeAmount, summarizeTicketAmount, formatPrice } from "../constants/util";
+import { getEventTitle, getServiceFeeAmount, formatPrice } from "../constants/util";
 import { Options } from "../constants/Constants";
 import { getOption } from "./options";
 import ejs from "ejs";
@@ -13,19 +13,6 @@ enum PaymentType {
     Invoice = "Invoice"
 }
 
-// Database ticket type (without price property)
-type DatabaseTicket = {
-    orderId: string;
-    id: string;
-    categoryId: number;
-    used: boolean;
-    firstName: string;
-    lastName: string;
-    seatId: number;
-    secret: string;
-    amount: number;
-};
-
 export const generateInvoice = async (orderId: string, template: Buffer, currency: string = "GBP") => {
     const orderDB = await prisma.order.findUnique({
         where: {
@@ -38,7 +25,11 @@ export const generateInvoice = async (orderId: string, template: Buffer, currenc
                     event: true
                 }
             },
-            tickets: true
+            orderItems: {
+                include: {
+                    eventTicketType: true
+                }
+            }
         }
     });
 
@@ -49,17 +40,15 @@ export const generateInvoice = async (orderId: string, template: Buffer, currenc
     const shippingFees = await getOption(Options.PaymentFeesShipping);
     const paymentFees = await getOption(Options.PaymentFeesPayment);
 
-    const categories = await prisma.category.findMany();
-    const totalPrice = calculateTotalPrice(
-        orderDB.tickets as any, // Type assertion to bypass type checking for database tickets
-        categories,
-        shippingFees,
-        paymentFees,
-        JSON.parse(orderDB.shipping).type,
-        orderDB.paymentType
-    );
+    const shippingFeeAmount = getServiceFeeAmount(shippingFees, JSON.parse(orderDB.shipping).type);
+    const paymentFeeAmount = getServiceFeeAmount(paymentFees, orderDB.paymentType);
 
-    let orders: Array<{ categoryId: number; amount: number }> = summarizeTicketAmount(orderDB.tickets as any, categories, true);
+    // Calculate total from orderItems (unitPrice and quantity are in pence)
+    const ticketTotalPence = orderDB.orderItems.reduce(
+        (sum, item) => sum + item.unitPrice * item.quantity,
+        0
+    );
+    const totalPrice = ticketTotalPence / 100 + shippingFeeAmount + paymentFeeAmount;
 
     let purpose = undefined;
     if (orderDB.paymentType === PaymentType.Invoice && orderDB.paymentIntent) {
@@ -82,17 +71,12 @@ export const generateInvoice = async (orderId: string, template: Buffer, currenc
     const date = new Date();
     const taxAmount = (await getOption(Options.TaxAmount));
 
-    const products = orders.map((order) => {
-        const category = categories.find(
-            (category) => category.id === order.categoryId
-        );
-        return {
-            name: category.label,
-            unit_price: formatPrice(category.price, currency),
-            amount: order.amount,
-            total_price: formatPrice(category.price * order.amount, currency)
-        };
-    });
+    const products = orderDB.orderItems.map((item) => ({
+        name: item.eventTicketType.name,
+        unit_price: formatPrice(item.unitPrice / 100, currency),
+        amount: item.quantity,
+        total_price: formatPrice((item.unitPrice * item.quantity) / 100, currency)
+    }));
     if (getServiceFeeAmount(shippingFees, JSON.parse(orderDB.shipping).type) !== 0) {
         products.push({
             name: "Shipping Fee",

@@ -2,7 +2,6 @@ import { IAddress } from "./interfaces";
 import { PersonalInformationState } from "../store/reducers/personalInformationReducer";
 import axios from "axios";
 import { OrderState, Tickets } from "../store/reducers/orderReducer";
-import { SeatMap } from "../components/seatselection/seatmap/SeatSelectionMap";
 import { idempotencyCall } from "../lib/idempotency/clientsideIdempotency";
 
 export type AddressValidator = (address: IAddress) => boolean;
@@ -84,23 +83,8 @@ export const validatePayment = async (orderId, withResult?: boolean): Promise<bo
     return response.data.valid;
 };
 
-export const ticketsOccupied = (tickets: Tickets, seatMap: SeatMap) => {
-    return tickets.some(ticket => seatMap.flat().find(seat => seat.id === ticket.seatId).occupied);
-}
-
 // Type for database tickets (without price property)
 export type DatabaseTicket = Omit<import("../store/reducers/orderReducer").Ticket, "price">;
-
-export const getSeatMap = (event): SeatMap => {
-   return event?.seatType?.toLowerCase() === "seatmap" && event?.seatMap?.definition
-       ? JSON.parse(event.seatMap.definition)
-       : null;
-}
-
-export const validateCategoriesWithSeatMap = (tickets: DatabaseTicket[], seatMap: SeatMap): DatabaseTicket[] => {
-    if (seatMap === null) return tickets;
-    return tickets.map(ticket => ({...ticket, categoryId: seatMap.flat().find(seat => seat.id === ticket.seatId).category}));
-}
 
 export const getServiceFeeAmount = (fees, type) => {
     return fees ? fees[type] ?? 0 : 0;
@@ -118,20 +102,12 @@ export const calculateTotalPrice = (
     const paymentPrice = getServiceFeeAmount(paymentFees, paymentType);
     
     const ticketTotal = tickets.reduce((a, ticket) => {
-        // Handle both EventTicketType and legacy Category systems
+        // Handle EventTicketType (ticketTypeId, eventTicketTypeId) systems
         let ticketPrice = 0;
-        
-        if (ticket.categoryId) {
-            const category = categories.find(category => category.id === ticket.categoryId);
-            ticketPrice = category?.price || 0;
-        }
-        
-        // If no price found and this is likely a free event, use 0
-        if (ticketPrice === 0) {
-            ticketPrice = 0;
-        }
-        
-        return a + (ticket.amount * ticketPrice);
+        const ticketTypeId = ticket.ticketTypeId || (ticket as any).eventTicketTypeId;
+        const ticketType = categories.find((c: { id: number }) => c.id === ticketTypeId);
+        ticketPrice = ticketType?.price || 0;
+        return a + ((ticket as any).amount * ticketPrice);
     }, 0);
     
     return ticketTotal + shippingPrice + paymentPrice;
@@ -145,10 +121,10 @@ export const totalSeatAmount = (order: OrderState): number => {
     return order.tickets.reduce((a, ticket) => a + ticket.amount, 0);
 };
 
-export const summarizeTicketAmount = (tickets: Tickets, categories: Array<{id: number;}>, hideEmptyCategories?: boolean) => {
-    let items = categories
-        .map(category => ({categoryId: category.id, amount: tickets.filter(ticket => ticket.categoryId === category.id).length}));
-    if (hideEmptyCategories)
+export const summarizeTicketAmount = (tickets: Tickets, ticketTypes: Array<{id: number;}>, hideEmptyTypes?: boolean) => {
+    let items = ticketTypes
+        .map(ticketType => ({ticketTypeId: ticketType.id, amount: tickets.filter(ticket => ticket.ticketTypeId === ticketType.id).length}));
+    if (hideEmptyTypes)
         return items.filter(item => item.amount > 0);
     return items;
 }

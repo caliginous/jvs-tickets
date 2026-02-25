@@ -5,7 +5,7 @@ import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import absoluteUrl from "next-absolute-url";
 import { withNotification } from "../../../lib/notifications/withNotification";
 import { OrderState } from "../../../store/reducers/orderReducer";
-import { calculateTotalPrice, getSeatMap, validateCategoriesWithSeatMap, DatabaseTicket } from "../../../constants/util";
+import { getServiceFeeAmount } from "../../../constants/util";
 import { PaymentType } from "../../../store/factories/payment/PaymentFactory";
 import { getOption } from "../../../lib/options";
 import { Options } from "../../../constants/Constants";
@@ -31,15 +31,14 @@ async function handler(
                 id: order.orderId
             },
             select: {
-                tickets: true,
+                tickets: {
+                    include: {
+                        eventTicketType: true
+                    }
+                },
                 eventDate: {
                     select: {
-                        event: {
-                            select: {
-                                seatType: true,
-                                seatMap: true
-                            }
-                        }
+                        event: true
                     }
                 },
                 paymentIntent: true,
@@ -54,15 +53,17 @@ async function handler(
             });
         }
 
-        const categories = await prisma.category.findMany();
-        const totalPrice = calculateTotalPrice(
-            validateCategoriesWithSeatMap(orderDB.tickets, getSeatMap(orderDB.eventDate.event)),
-            categories,
-            await getOption(Options.PaymentFeesShipping),
-            await getOption(Options.PaymentFeesPayment),
-            JSON.parse(orderDB.shipping).type,
-            orderDB.paymentType
-        );
+        const shippingFees = await getOption(Options.PaymentFeesShipping);
+        const paymentFees = await getOption(Options.PaymentFeesPayment);
+        let shippingType: string | null = null;
+        try {
+            shippingType = JSON.parse(orderDB.shipping).type;
+        } catch { /* ignore */ }
+        const ticketTotal = orderDB.tickets.reduce((sum: number, t: any) => {
+            const price = t.eventTicketType?.price ?? 0;
+            return sum + (t.amount * price);
+        }, 0);
+        const totalPrice = ticketTotal + getServiceFeeAmount(shippingFees, shippingType) + getServiceFeeAmount(paymentFees, orderDB.paymentType);
 
         const data = {
             multipay: {

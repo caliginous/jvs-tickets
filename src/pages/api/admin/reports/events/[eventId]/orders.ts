@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { serverAuthenticate } from '../../../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
 import prisma from '../../../../../../lib/prisma';
+import { CAPACITY_RESERVED_STATUSES_ARRAY, reservesCapacity } from '../../../../../../constants/orderStatuses';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'GET') {
@@ -28,8 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         // Find the event and its dates
-        // Only include confirmed orders (exclude PENDING, EXPIRED, CANCELLED, fully REFUNDED)
-        // Include PARTIALLY_REFUNDED as these customers still have valid tickets
+        // Only include capacity-reserved orders (CONFIRMED, PAID, COMPLETED, PARTIALLY_REFUNDED)
         const event = await prisma.event.findUnique({
             where: { id: eventIdNum },
             include: {
@@ -38,13 +38,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     include: {
                         orders: {
                             where: {
-                                status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED'] }
+                                status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
                             },
                             include: {
                                 user: true,
                                 tickets: {
                                     include: {
-                                        category: true,
                                         eventTicketType: true
                                     }
                                 }
@@ -64,12 +63,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         
         for (const eventDate of event.dates) {
             for (const order of eventDate.orders) {
-                // Only include confirmed orders (already filtered at query level, but double-check)
-                // Include PARTIALLY_REFUNDED as these customers still have valid tickets
-                if (['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED'].includes(order.status)) {
+                // Only include capacity-reserved orders (already filtered at query level, but double-check)
+                if (reservesCapacity(order.status)) {
                     // Get all ticket types for this order
                     const ticketTypes = order.tickets.map(ticket => {
-                        const typeName = ticket.eventTicketType?.name || ticket.category?.label || 'Standard';
+                        const typeName = ticket.eventTicketType?.name || 'Standard';
                         return `${ticket.amount}× ${typeName}`;
                     }).join(', ');
                     

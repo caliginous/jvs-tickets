@@ -9,8 +9,7 @@ async function listAllEvents() {
             select: {
                 id: true,
                 title: true,
-                seatType: true,
-                seatMapId: true,
+                slug: true,
                 coverImage: true,
                 coverImageSize: true,
                 personalTicket: true,
@@ -36,7 +35,7 @@ async function listAllEvents() {
                         }
                     });
 
-                    const categoriesCount = await prisma.categoriesOnEvents.count({
+                    const ticketTypesCount = await prisma.eventTicketType.count({
                         where: { eventId: event.id }
                     });
 
@@ -52,7 +51,7 @@ async function listAllEvents() {
                     return {
                         ...event,
                         dates: dates || [],
-                        categoriesCount: categoriesCount || 0,
+                        ticketTypesCount: ticketTypesCount || 0,
                         ordersCount: ordersCount || 0
                     };
                 } catch (error) {
@@ -60,7 +59,7 @@ async function listAllEvents() {
                     return {
                         ...event,
                         dates: [],
-                        categoriesCount: 0,
+                        ticketTypesCount: 0,
                         ordersCount: 0
                     };
                 }
@@ -78,12 +77,12 @@ async function listAllEvents() {
         eventsWithDetails.forEach((event, index) => {
             console.log(`${index + 1}. 🎭 Event ID: ${event.id}`);
             console.log(`   📌 Title: ${event.title}`);
-            console.log(`   🎯 Seat Type: ${event.seatType}`);
+            console.log(`   🔗 Slug: ${event.slug || 'N/A'}`);
             console.log(`   🏢 Venue: ${event.venueId ? `Venue ID: ${event.venueId}` : 'No venue specified'}`);
             console.log(`   📝 Description: ${event.description ? event.description.substring(0, 100) + '...' : 'No description'}`);
             console.log(`   🎫 Personal Ticket: ${event.personalTicket ? 'Yes' : 'No'}`);
             console.log(`   ✅ Active: ${event.isActive ? 'Yes' : 'No'}`);
-            console.log(`   📊 Categories: ${event.categoriesCount}`);
+            console.log(`   📊 Ticket Types: ${event.ticketTypesCount}`);
             console.log(`   📅 Event Dates: ${event.dates.length}`);
 
             // Show event dates
@@ -92,11 +91,6 @@ async function listAllEvents() {
                 event.dates.forEach((date, dateIndex) => {
                     console.log(`      ${dateIndex + 1}. ${new Date(date.date).toLocaleDateString()} - Limit: ${date.totalTicketLimit || 'No limit'}, Orders: ${event.ordersCount}`);
                 });
-            }
-
-            // Show categories if any
-            if (event.categoriesCount > 0) {
-                console.log(`   🏷️  Categories: ${event.categoriesCount} configured`);
             }
 
             console.log("─".repeat(50));

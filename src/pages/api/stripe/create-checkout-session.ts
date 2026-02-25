@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { createCheckoutSession } from '../../../lib/stripe';
 import prisma from '../../../lib/prisma';
+import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -35,9 +36,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Validate ticket structure
     for (const ticket of tickets) {
-      if (!ticket.categoryId || !ticket.amount || ticket.price === undefined || ticket.price === null || !ticket.name) {
+      if (!ticket.ticketTypeId || !ticket.amount || ticket.price === undefined || ticket.price === null || !ticket.name) {
         console.error('❌ Validation failed: Invalid ticket structure', ticket);
-        return res.status(400).json({ error: 'Invalid ticket structure' });
+        return res.status(400).json({ error: 'Invalid ticket structure - ticketTypeId required' });
       }
     }
 
@@ -63,83 +64,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log(`✅ Ticket sale end date check passed: sales end at ${saleEndDate.toISOString()}`);
     }
 
-    // CAPACITY CHECK: Validate capacity before creating order
-    // Check against confirmed + pending orders to prevent overselling
-    console.log('🔒 Checking ticket capacity...');
+    // CAPACITY CHECK: Use canonical availability service
+    console.log('🔒 Checking ticket capacity via availability service...');
     
-    // Step 1: Check GLOBAL ticket limit on EventDate
-    const eventDateRecord = eventDateForSaleCheck;
+    const capacityItems = tickets.map(t => ({
+      eventTicketTypeId: t.ticketTypeId,
+      quantity: t.amount
+    }));
     
-    if (eventDateRecord?.totalTicketLimit !== null && eventDateRecord?.totalTicketLimit !== undefined) {
-      const totalTicketsRequested = tickets.reduce((sum, t) => sum + t.amount, 0);
-      
-      // Count ALL tickets already sold/reserved for this event date (across all ticket types)
-      // Include PARTIALLY_REFUNDED as those tickets are still valid
-      const totalSoldAndReserved = await prisma.ticket.count({
-        where: {
-          order: {
-            eventDateId: eventDateId,
-            status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PENDING', 'PARTIALLY_REFUNDED'] }
-          }
-        }
+    const capacityCheck = await checkCapacityForOrder(eventDateId, capacityItems);
+    
+    if (!capacityCheck.success) {
+      const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
+      const errorDetails = 'details' in capacityCheck ? capacityCheck.details : undefined;
+      console.error(`❌ Capacity check failed: ${errorMessage}`);
+      return res.status(409).json({ 
+        error: errorMessage,
+        details: errorDetails
       });
-      
-      const globalAvailable = eventDateRecord.totalTicketLimit - totalSoldAndReserved;
-      
-      console.log(`🌐 Global limit check: limit=${eventDateRecord.totalTicketLimit}, sold=${totalSoldAndReserved}, available=${globalAvailable}, requested=${totalTicketsRequested}`);
-      
-      if (totalTicketsRequested > globalAvailable) {
-        console.error(`❌ Global ticket limit exceeded: requested ${totalTicketsRequested}, available ${globalAvailable}`);
-        return res.status(409).json({ 
-          error: globalAvailable <= 0 
-            ? 'Sorry, this event is sold out'
-            : `Sorry, only ${globalAvailable} ticket(s) remaining for this event`,
-          remainingCapacity: globalAvailable
-        });
-      }
-      
-      console.log(`✅ Global ticket limit check passed`);
-    }
-    
-    // Step 2: Check individual ticket type capacity limits
-    for (const ticket of tickets) {
-      const ticketTypeId = ticket.categoryId; // categoryId is actually eventTicketTypeId in this context
-      
-      // Get ticket type with capacity
-      const ticketType = await prisma.eventTicketType.findUnique({
-        where: { id: ticketTypeId },
-        select: { capacity: true, name: true }
-      });
-      
-      if (!ticketType) {
-        console.error(`❌ Ticket type ${ticketTypeId} not found`);
-        return res.status(400).json({ error: `Ticket type not found` });
-      }
-      
-      // If capacity is set, check availability (including PENDING orders)
-      // Include PARTIALLY_REFUNDED as those tickets are still valid
-      if (ticketType.capacity !== null) {
-        const soldAndReserved = await prisma.ticket.count({
-          where: {
-            eventTicketTypeId: ticketTypeId,
-            order: {
-              status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PENDING', 'PARTIALLY_REFUNDED'] }
-            }
-          }
-        });
-        
-        const available = ticketType.capacity - soldAndReserved;
-        
-        if (ticket.amount > available) {
-          console.error(`❌ Insufficient capacity for ${ticketType.name}: requested ${ticket.amount}, available ${available}`);
-          return res.status(409).json({ 
-            error: `Sorry, only ${available} ${ticketType.name} ticket(s) remaining`,
-            remainingCapacity: available
-          });
-        }
-        
-        console.log(`✅ Capacity available for ${ticketType.name}: ${ticket.amount} requested, ${available} available`);
-      }
     }
     
     console.log('✅ All capacity checks passed');
@@ -237,7 +179,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await prisma.ticket.create({
           data: {
             orderId: orderId,
-            eventTicketTypeId: ticket.categoryId, // categoryId is actually eventTicketTypeId
+            eventTicketTypeId: ticket.ticketTypeId,
             amount: 1,
             priceCharged: ticket.price, // Already in pence
             secret: Math.random().toString(36).substr(2, 15),

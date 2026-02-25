@@ -8,11 +8,6 @@ interface Event {
     title: string;
 }
 
-interface Category {
-    id: string;
-    label: string;
-}
-
 interface DiscountCodeFormData {
     id?: string;
     code: string;
@@ -24,7 +19,6 @@ interface DiscountCodeFormData {
     usageLimit?: number;
     isActive: boolean;
     appliesToEvents: string[];
-    appliesToCategories: string[];
     minimumOrderValue?: number;
     maximumDiscount?: number;
 }
@@ -52,20 +46,17 @@ export const CreateDiscountCodeDialog: React.FC<CreateDiscountCodeDialogProps> =
         usageLimit: undefined,
         isActive: true,
         appliesToEvents: [],
-        appliesToCategories: [],
         minimumOrderValue: undefined,
         maximumDiscount: undefined
     });
 
     const [events, setEvents] = useState<Event[]>([]);
-    const [categories, setCategories] = useState<Category[]>([]);
     const [loading, setLoading] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
             fetchEvents();
-            fetchCategories();
             if (editData) {
                 setFormData({
                     ...editData,
@@ -83,7 +74,6 @@ export const CreateDiscountCodeDialog: React.FC<CreateDiscountCodeDialogProps> =
                     usageLimit: undefined,
                     isActive: true,
                     appliesToEvents: [],
-                    appliesToCategories: [],
                     minimumOrderValue: undefined,
                     maximumDiscount: undefined
                 });
@@ -97,15 +87,6 @@ export const CreateDiscountCodeDialog: React.FC<CreateDiscountCodeDialogProps> =
             setEvents(response.data);
         } catch (error) {
             console.error('Error fetching events:', error);
-        }
-    };
-
-    const fetchCategories = async () => {
-        try {
-            const response = await axios.get('/api/admin/category');
-            setCategories(response.data);
-        } catch (error) {
-            console.error('Error fetching categories:', error);
         }
     };
 
@@ -331,33 +312,6 @@ export const CreateDiscountCodeDialog: React.FC<CreateDiscountCodeDialogProps> =
                                     }
                                 }}
                                 placeholder="Select events"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Applies to Categories
-                            </label>
-                            <Select
-                                options={[
-                                    { value: '', label: 'All Categories' },
-                                    ...categories.map(category => ({
-                                        value: String(category.id),
-                                        label: category.label
-                                    }))
-                                ]}
-                                value={formData.appliesToCategories[0] || ''}
-                                onChange={(value) => {
-                                    if (value === '') {
-                                        handleInputChange('appliesToCategories', []);
-                                    } else {
-                                        const newCategories = formData.appliesToCategories.includes(value) 
-                                            ? formData.appliesToCategories 
-                                            : [...formData.appliesToCategories, value];
-                                        handleInputChange('appliesToCategories', newCategories);
-                                    }
-                                }}
-                                placeholder="Select categories"
                             />
                         </div>
 

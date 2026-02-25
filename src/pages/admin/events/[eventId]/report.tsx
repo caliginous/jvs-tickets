@@ -3,6 +3,7 @@ import { AdminLayout } from "../../../../components/admin/layout";
 
 import { getAdminServerSideProps } from "../../../../constants/serverUtil";
 import { PermissionSection, PermissionType } from "../../../../constants/interfaces";
+import { reservesCapacity } from "../../../../constants/orderStatuses";
 import prisma from "../../../../lib/prisma";
 import * as React from "react";
 import { useEffect, useState, useCallback } from "react";
@@ -39,10 +40,9 @@ export default function EventReportPage() {
             const ordersResponse = await axios.get(`/api/admin/order?eventId=${eventId}`);
             const ordersData = ordersResponse.data;
             
-            // Calculate totals from CONFIRMED orders only (exclude PENDING, EXPIRED, CANCELLED, fully REFUNDED)
-            // Include PARTIALLY_REFUNDED as these customers still have valid tickets
+            // Calculate totals from capacity-reserved orders only
             const confirmedOrders = ordersData.filter(order => 
-                ['CONFIRMED', 'PAID', 'COMPLETED', 'PARTIALLY_REFUNDED'].includes(order.status)
+                reservesCapacity(order.status)
             );
             
             const totalOrders = confirmedOrders.length;

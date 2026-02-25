@@ -37,11 +37,11 @@ export default function Payment({currency}) {
             try {
                 const response = await axios.get(getURL());
                 const tickets = response.data.map(ticket => ({
-                    primaryLabel: ticket.category.label,
-                    secondaryLabel: ticket.seatId && t("common:seat", {seat: ticket.seatId}),
+                    primaryLabel: ticket.eventTicketType?.name ?? 'Ticket',
+                    secondaryLabel: null,
                     value: ticket.id,
-                    additionalNode: formatPrice(ticket.category.price, currency),
-                    price: ticket.category.price
+                    additionalNode: formatPrice(ticket.eventTicketType?.price ? ticket.eventTicketType.price / 100 : 0, currency),
+                    price: ticket.eventTicketType?.price ? ticket.eventTicketType.price / 100 : 0
                 }));
                 setTicketList(tickets);
             } catch (e) {

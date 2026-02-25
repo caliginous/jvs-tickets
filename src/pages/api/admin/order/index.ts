@@ -222,7 +222,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     user: true,
                     tickets: {
                         include: {
-                            category: true,
                             eventTicketType: true
                         }
                     }

@@ -21,7 +21,6 @@ interface DiscountCode {
     usageLimit?: number;
     isActive: boolean;
     appliesToEvents: string[];
-    appliesToCategories: string[];
     minimumOrderValue?: number;
     maximumDiscount?: number;
     createdAt: string;

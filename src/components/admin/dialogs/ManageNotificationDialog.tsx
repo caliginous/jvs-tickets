@@ -1,6 +1,5 @@
 import { Dialog, Button, Select } from "../../../ui";
 import { useEffect, useState } from "react";
-import { CategorySelection } from "../CategorySelection";
 import {
     NotificationDataFields,
     NotificationHandler,
@@ -101,7 +100,35 @@ export const ManageNotificationDialog = ({open, notification, onClose, onChange}
                             </details>
                         </div>
                     )}
-                    <CategorySelection onChange={setCurrentServices} currentValues={currentServices} selectionValues={Notifications} />
+                    <div className="space-y-3">
+                        <span className="text-sm font-medium text-gray-700">Notification Services</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {Object.entries(Notifications).map(([serviceKey, serviceValues]) => (
+                                <div key={serviceKey} className="border rounded p-2">
+                                    <div className="text-xs font-medium text-gray-500 mb-1 capitalize">{serviceKey.replace('_', ' ')}</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {serviceValues.map((val) => (
+                                            <label key={val} className="flex items-center gap-1 text-sm">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={(currentServices[serviceKey] || []).includes(val)}
+                                                    onChange={(e) => {
+                                                        const current = currentServices[serviceKey] || [];
+                                                        const next = e.target.checked
+                                                            ? [...current, val]
+                                                            : current.filter((v) => v !== val);
+                                                        setCurrentServices((prev) => ({ ...prev, [serviceKey]: next }));
+                                                    }}
+                                                    className="rounded border-gray-300"
+                                                />
+                                                <span className="capitalize">{val}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                     <Button 
                         variant="solid" 
                         id="save-notification" 

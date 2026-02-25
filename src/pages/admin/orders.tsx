@@ -1,7 +1,8 @@
 import { useSession } from "next-auth/react";
 import { AdminLayout } from "../../components/admin/layout";
 import Link from "next/link";
-import { getAdminServerSideProps, getCategoryTicketAmount, getSeatMap } from "../../constants/serverUtil";
+import { getAdminServerSideProps } from "../../constants/serverUtil";
+import { computeAvailability } from "../../lib/services/ticketing/availability";
 import prisma from "../../lib/prisma";
 import { InformationCircleIcon, CheckIcon, XIcon, EyeIcon, DownloadIcon, CurrencyPoundIcon, XCircleIcon, TrashIcon } from "@heroicons/react/solid";
 import * as React from "react";
@@ -1039,52 +1040,38 @@ export async function getServerSideProps(context: NextPageContext) {
                         select: {
                             id: true,
                             title: true,
-                            seatType: true,
-                            seatMap: {
-                                select: {
-                                    definition: true
-                                }
-                            },
-                            categories: {
-                                include: {
-                                    category: true
-                                }
-                            }
+                            ticketTypes: true
                         }
                     }
                 }
             });
-
-            const eventDateMaps = await Promise.all(eventDates.map(async (event) => {
-                event["seatType"] = event.event.seatType;
-                if (event.event.seatMap?.definition) {
-                    event["seatMap"] = {definition: await getSeatMap(event.id, true)};
-                }
-
-                return event;
-            }));
 
             const events = await prisma.event.findMany({
                 include: {
                     dates: true
                 }
             });
-            const currentAmounts = {};
-            for (let eventDate of eventDates) {
-                currentAmounts[eventDate.id] = await getCategoryTicketAmount(eventDate.id);
+
+            const categories: Record<number, Array<{ id: number; price: number; label?: string; ticketsLeft?: number | null }>> = {};
+            for (const eventDate of eventDates) {
+                try {
+                    const availability = await computeAvailability(eventDate.id);
+                    categories[eventDate.id] = availability.ticketTypes.map(tt => ({
+                        id: tt.eventTicketTypeId,
+                        price: tt.price,
+                        label: tt.name,
+                        ticketsLeft: tt.available
+                    }));
+                } catch {
+                    categories[eventDate.id] = [];
+                }
             }
 
             return {
-                props: {
+                    props: {
                     count,
-                    categories: eventDates.reduce((group, eventDate) => {
-                        group[eventDate.id] = eventDate.event.categories.map(category => ({
-                                ...category.category,
-                                ticketsLeft: isNaN(category.maxAmount) || !category.maxAmount || category.maxAmount === 0 ? null : Math.max(category.maxAmount - currentAmounts[eventDate.id][category.categoryId], 0)
-                            }))
-                        return group;
-                    }, {}),
-                    eventDates: JSON.parse(JSON.stringify(eventDateMaps)),
+                    categories,
+                    eventDates: JSON.parse(JSON.stringify(eventDates)),
                     events: JSON.parse(JSON.stringify(events)),
                     paymentFees: await getOption(Options.PaymentFeesPayment),
                     shippingFees: await getOption(Options.PaymentFeesShipping),

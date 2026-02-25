@@ -393,12 +393,11 @@ export const send = async (orderId, isCancellation?: boolean) => {
             select: {
                 id: true,
                 secret: true,
-                seatId: true,
                 firstName: true,
                 lastName: true,
-                category: {
+                eventTicketType: {
                     select: {
-                        label: true
+                        name: true
                     }
                 },
                 order: {

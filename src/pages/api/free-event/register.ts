@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../lib/prisma';
 import { send } from '../../../lib/send';
+import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'POST') {
@@ -58,87 +59,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             console.log(`✅ Ticket sale end date check passed: sales end at ${saleEndDate.toISOString()}`);
         }
 
-        // CAPACITY CHECK: Validate capacity for free events
+        // CAPACITY CHECK: Use canonical availability service
         console.log('🔒 Checking ticket capacity for free event...');
         
-        // Step 1: Check GLOBAL ticket limit on EventDate
-        const eventDateRecord = eventDateForSaleCheck;
-        
-        if (eventDateRecord?.totalTicketLimit !== null && eventDateRecord?.totalTicketLimit !== undefined) {
-            const totalTicketsRequested = tickets.reduce((sum: number, t: any) => sum + t.amount, 0);
-            
-            // Count ALL tickets already sold/reserved for this event date (across all ticket types)
-            // Include PARTIALLY_REFUNDED as those tickets are still valid
-            const totalSoldAndReserved = await prisma.ticket.count({
-                where: {
-                    order: {
-                        eventDateId: eventDateIdParsed,
-                        status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PENDING', 'PARTIALLY_REFUNDED'] }
-                    }
-                }
-            });
-            
-            const globalAvailable = eventDateRecord.totalTicketLimit - totalSoldAndReserved;
-            
-            console.log(`🌐 Global limit check: limit=${eventDateRecord.totalTicketLimit}, sold=${totalSoldAndReserved}, available=${globalAvailable}, requested=${totalTicketsRequested}`);
-            
-            if (totalTicketsRequested > globalAvailable) {
-                console.error(`❌ Global ticket limit exceeded: requested ${totalTicketsRequested}, available ${globalAvailable}`);
-                return res.status(409).json({ 
-                    error: globalAvailable <= 0 
-                        ? 'Sorry, this event is sold out'
-                        : `Sorry, only ${globalAvailable} ticket(s) remaining for this event`,
-                    remainingCapacity: globalAvailable
-                });
-            }
-            
-            console.log(`✅ Global ticket limit check passed`);
-        }
-        
-        // Step 2: Check individual ticket type capacity limits
+        // Validate ticket type IDs first
         for (const ticket of tickets) {
-            const ticketTypeId = ticket.categoryId || ticket.eventTicketTypeId;
-            
+            const ticketTypeId = ticket.ticketTypeId || ticket.eventTicketTypeId;
             if (!ticketTypeId) {
                 console.error('❌ No ticket type ID provided');
-                return res.status(400).json({ error: 'Ticket type ID required' });
+                return res.status(400).json({ error: 'ticketTypeId or eventTicketTypeId required' });
             }
-            
-            // Get ticket type with capacity
-            const ticketType = await prisma.eventTicketType.findUnique({
-                where: { id: ticketTypeId },
-                select: { capacity: true, name: true }
+        }
+        
+        const capacityItems = tickets.map((t: any) => ({
+            eventTicketTypeId: t.ticketTypeId || t.eventTicketTypeId,
+            quantity: t.amount
+        }));
+        
+        const capacityCheck = await checkCapacityForOrder(eventDateIdParsed, capacityItems);
+        
+        if (!capacityCheck.success) {
+            const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
+            const errorDetails = 'details' in capacityCheck ? capacityCheck.details : undefined;
+            console.error(`❌ Capacity check failed: ${errorMessage}`);
+            return res.status(409).json({ 
+                error: errorMessage,
+                details: errorDetails
             });
-            
-            if (!ticketType) {
-                console.error(`❌ Ticket type ${ticketTypeId} not found`);
-                return res.status(400).json({ error: 'Ticket type not found' });
-            }
-            
-            // If capacity is set, check availability (including PENDING orders)
-            // Include PARTIALLY_REFUNDED as those tickets are still valid
-            if (ticketType.capacity !== null) {
-                const soldAndReserved = await prisma.ticket.count({
-                    where: {
-                        eventTicketTypeId: ticketTypeId,
-                        order: {
-                            status: { in: ['CONFIRMED', 'PAID', 'COMPLETED', 'PENDING', 'PARTIALLY_REFUNDED'] }
-                        }
-                    }
-                });
-                
-                const available = ticketType.capacity - soldAndReserved;
-                
-                if (ticket.amount > available) {
-                    console.error(`❌ Insufficient capacity for ${ticketType.name}: requested ${ticket.amount}, available ${available}`);
-                    return res.status(409).json({ 
-                        error: `Sorry, only ${available} ${ticketType.name} ticket(s) remaining`,
-                        remainingCapacity: available
-                    });
-                }
-                
-                console.log(`✅ Capacity available for ${ticketType.name}: ${ticket.amount} requested, ${available} available`);
-            }
         }
         
         console.log('✅ All capacity checks passed, creating order...');
@@ -202,59 +149,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
         });
 
-        // Create tickets using EventTicketTypes (preferred) or fallback to categories
+        // Create tickets using EventTicketTypes
         const createdTickets = [];
         for (const ticketData of tickets) {
-            console.log(`Creating tickets for: categoryId=${ticketData.categoryId}, eventTicketTypeId=${ticketData.eventTicketTypeId}`);
+            const eventTicketTypeId = ticketData.ticketTypeId || ticketData.eventTicketTypeId;
             
-            let eventTicketTypeId = ticketData.eventTicketTypeId;
+            console.log(`Creating tickets for eventTicketTypeId=${eventTicketTypeId}`);
             
-            // If no eventTicketTypeId provided, try to find one based on categoryId
-            if (!eventTicketTypeId && ticketData.categoryId) {
-                console.log(`Looking for EventTicketType for categoryId ${ticketData.categoryId}...`);
-                
-                // Find EventTicketType for this event that matches the legacy category
-                const eventTicketType = await prisma.eventTicketType.findFirst({
-                    where: {
-                        eventId: (await prisma.eventDate.findUnique({
-                            where: { id: parseInt(eventDateId) },
-                            select: { eventId: true }
-                        }))?.eventId,
-                        isActive: true
-                    },
-                    orderBy: { sortOrder: 'asc' }
-                });
-                
-                if (eventTicketType) {
-                    eventTicketTypeId = eventTicketType.id;
-                    console.log(`Found EventTicketType ${eventTicketTypeId} for event`);
-                } else {
-                    console.warn(`No EventTicketType found for categoryId ${ticketData.categoryId}, event will fail`);
-                }
+            if (!eventTicketTypeId) {
+                console.error('No ticket type ID provided');
+                throw new Error('ticketTypeId or eventTicketTypeId required');
             }
 
             const ticketCreateData: any = {
                 orderId: order.id,
                 amount: ticketData.amount,
-                currency: 'GBP'
+                currency: 'GBP',
+                eventTicketTypeId
             };
 
-            // Prefer EventTicketType over legacy category
-            if (eventTicketTypeId) {
-                ticketCreateData.eventTicketTypeId = eventTicketTypeId;
-            } else if (ticketData.categoryId) {
-                // Only use categoryId if the category actually exists
-                const categoryExists = await prisma.category.findUnique({
-                    where: { id: ticketData.categoryId }
-                });
-                
-                if (categoryExists) {
-                    ticketCreateData.categoryId = ticketData.categoryId;
-                } else {
-                    throw new Error(`Category ${ticketData.categoryId} does not exist and no EventTicketType found`);
-                }
-            } else {
-                throw new Error('No valid ticket type or category found');
+            // Validate ticket type exists (should not reach here given earlier check)
+            if (!eventTicketTypeId) {
+                throw new Error('No valid ticket type (eventTicketTypeId) found');
             }
 
             for (let i = 0; i < ticketData.amount; i++) {
@@ -269,14 +185,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 createdTickets.push(ticket);
             }
             
-            // Increment sold counter for this ticket type (free events are immediately CONFIRMED)
-            if (eventTicketTypeId) {
-                await prisma.eventTicketType.update({
-                    where: { id: eventTicketTypeId },
-                    data: { sold: { increment: ticketData.amount } }
-                });
-                console.log(`Incremented sold count for ticket type ${eventTicketTypeId} by ${ticketData.amount}`);
-            }
+            // NOTE: EventTicketType.sold is deprecated and no longer updated.
+            // Availability is computed dynamically from Ticket rows via availability service.
         }
 
         console.log(`✅ Created ${createdTickets.length} free tickets for order ${order.id}`);

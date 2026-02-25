@@ -35,11 +35,6 @@ export default async function handler(
                         }
                     }
                 },
-                categories: {
-                    include: {
-                        category: true
-                    }
-                },
                 customFields: true
             }
         });
@@ -74,18 +69,14 @@ export default async function handler(
         const {
             title,
             subtitle,
-            slug: providedSlug, // Rename to avoid conflict
+            slug: providedSlug,
             description,
             bespokeMessage,
-            seatType,
-            seatMapId,
             venueId,
             personalTicket,
             isActive,
-            selectedCategories,
-            categories, // Frontend also sends 'categories'
-            dates, // Frontend sends 'dates' array
-            eventDate, // Keep for backward compatibility
+            dates,
+            eventDate,
             eventDateTicketLimit,
             ticketSaleEndDate,
             startTime,
@@ -93,21 +84,16 @@ export default async function handler(
             timezone,
             customFields,
             status,
-            ticketTypes // New field for ticket types
+            ticketTypes
         } = req.body;
         
         console.log("Extracted values:");
         console.log("- title:", title);
         console.log("- description:", description);
-
-        console.log("- selectedCategories:", selectedCategories);
-        console.log("- categories:", categories);
         console.log("- dates:", dates);
         console.log("- eventDate:", eventDate);
         console.log("- eventDateTicketLimit:", eventDateTicketLimit);
         console.log("- venueId:", venueId, "type:", typeof venueId);
-        console.log("- seatType:", seatType);
-        console.log("- seatMapId:", seatMapId);
         console.log("- ticketTypes:", ticketTypes?.length || 0, "ticket types provided");
         
         // ENFORCE REQUIRED FIELDS
@@ -121,23 +107,13 @@ export default async function handler(
             return res.status(400).json({ error: 'Event date is required' });
         }
         
-        // Use categories or selectedCategories, whichever is provided
-        const categoriesToUse = categories || selectedCategories;
+        // Require ticket types (Category system deprecated)
+        const hasTicketTypes = ticketTypes && ticketTypes.length > 0;
         
-        // For free seating events, require either categories (legacy) OR ticket types (new system)
-        if (seatType === 'free') {
-            const hasCategories = categoriesToUse && categoriesToUse.length > 0;
-            const hasTicketTypes = ticketTypes && ticketTypes.length > 0;
-            
-            if (!hasCategories && !hasTicketTypes) {
-                return res.status(400).json({ 
-                    error: 'At least one ticket type is required for free seating events' 
-                });
-            }
-        }
-        
-        if (seatType === 'seatmap' && (!seatMapId || seatMapId <= 0)) {
-            return res.status(400).json({ error: 'Seat map is required for seatmap type events' });
+        if (!hasTicketTypes) {
+            return res.status(400).json({ 
+                error: 'At least one ticket type is required' 
+            });
         }
         
         // Generate slug for the event
@@ -159,21 +135,18 @@ export default async function handler(
                     title: title,
                     description: description,
                     slug: eventSlug,
-                    seatType: seatType,
-                    seatMapId: seatMapId ? parseInt(seatMapId.toString()) : null,
                     venueId: venueId ? parseInt(venueId.toString()) : null,
                     personalTicket: personalTicket || false
                 });
                 
+                const parsedVenueId = venueId ? parseInt(venueId.toString()) : null;
                 const event = await tx.event.create({
                     data: {
                         title: title,
                         description: description,
                         bespokeMessage: bespokeMessage || null,
                         slug: eventSlug,
-                        seatType: seatType,
-                        seatMapId: seatMapId ? parseInt(seatMapId.toString()) : null,
-                        venueId: venueId ? parseInt(venueId.toString()) : null,
+                        ...(parsedVenueId ? { venue: { connect: { id: parsedVenueId } } } : {}),
                         personalTicket: personalTicket || false,
                         isActive: isActive ?? true
                     }
@@ -181,21 +154,6 @@ export default async function handler(
 
                 console.log("Event created with ID:", event.id);
                 eventId = event.id;
-
-                // Create categories if provided (legacy support)
-                if (seatType === 'free' && categoriesToUse && categoriesToUse.length > 0) {
-                    console.log("Creating categories:", categoriesToUse);
-                    for (const category of categoriesToUse) {
-                        const categoryRecord = await tx.categoriesOnEvents.create({
-                            data: {
-                                eventId: eventId,
-                                categoryId: parseInt(category.toString()),
-                                maxAmount: parseInt((eventDateTicketLimit || 10).toString())
-                            }
-                        });
-                        console.log("Category created:", categoryRecord);
-                    }
-                }
 
                 // Create event date (REQUIRED)
                 const eventDateFromRequest = dates?.[0] || eventDate;

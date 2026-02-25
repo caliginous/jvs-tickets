@@ -10,7 +10,7 @@ import { eventDateIsBookable } from '../../constants/util';
 
 export default function BookingPage({
   event,
-  categories,
+  ticketTypes,
   paymentMethods,
   deliveryMethods,
   shippingFees,
@@ -51,7 +51,7 @@ export default function BookingPage({
       </Head>
       <UnifiedBookingPage
         event={event}
-        categories={categories}
+        ticketTypes={ticketTypes}
         paymentMethods={paymentMethods}
         deliveryMethods={deliveryMethods}
         shippingFees={shippingFees}
@@ -98,10 +98,9 @@ export async function getStaticProps({ params, locale }) {
         event: {
           include: {
             venue: true,
-            categories: {
-              include: {
-                category: true
-              }
+            ticketTypes: {
+              where: { isActive: true, isPublic: true },
+              orderBy: { publicSortOrder: 'asc' }
             },
             customFields: true
           }
@@ -119,7 +118,6 @@ export async function getStaticProps({ params, locale }) {
     }
 
     const event = eventDate.event;
-    const categories = await prisma.category.findMany();
     const deliveryMethods = await getOption(Options.Delivery);
     const paymentMethods = await getOption(Options.PaymentProviders);
     const shippingFees = await getOption(Options.PaymentFeesShipping);
@@ -127,13 +125,13 @@ export async function getStaticProps({ params, locale }) {
     const theme = await getOption(Options.Theme);
     const impressUrl = await getOption(Options.ImpressUrl);
 
-    // Transform categories to include price information
-    const transformedCategories = event.categories.map(ce => ({
-      id: ce.category.id,
-      name: ce.category.label,
-      price: ce.category.price,
-      maxAmount: ce.maxAmount,
-      color: ce.category.color
+    // Transform ticket types for display
+    const transformedTicketTypes = event.ticketTypes.map(tt => ({
+      id: tt.id,
+      name: tt.name,
+      price: tt.price / 100, // Convert from pence to pounds
+      maxAmount: tt.capacity,
+      color: tt.colorHex || '#4F46E5'
     }));
 
     return {
@@ -153,9 +151,9 @@ export async function getStaticProps({ params, locale }) {
           description: event.description,
           personalTicket: event.personalTicket || false,
           customFields: event.customFields || [],
-          categories: transformedCategories
+          ticketTypes: transformedTicketTypes
         },
-        categories: transformedCategories,
+        ticketTypes: transformedTicketTypes,
         deliveryMethods,
         paymentMethods,
         shippingFees,

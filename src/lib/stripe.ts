@@ -44,7 +44,7 @@ export const getStripe = async () => {
 // Create Stripe payment link
 export const createPaymentLink = async (params: {
   tickets: Array<{
-    categoryId: number;
+    ticketTypeId: number;
     amount: number;
     price: number;
     name: string;
@@ -159,7 +159,7 @@ export const createPaymentLink = async (params: {
 // Create Stripe checkout session
 export const createCheckoutSession = async (params: {
   tickets: Array<{
-    categoryId: number;
+    ticketTypeId: number;
     amount: number;
     price: number;
     name: string;

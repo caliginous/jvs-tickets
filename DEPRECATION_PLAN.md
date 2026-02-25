@@ -1,7 +1,8 @@
 # Categories & SeatMaps Deprecation Plan
 
 **Created:** February 25, 2026  
-**Status:** Ready to Execute  
+**Status:** Phase 0, Phase 1, Phase 2 COMPLETE  
+**Last Updated:** February 25, 2026  
 **Risk Level:** Low (SeatMaps) / Medium (Categories - code entanglement)
 
 ## Executive Summary
@@ -11,6 +12,35 @@ The ticketing system has two legacy subsystems that add complexity without provi
 - **SeatMaps** - Allocated seating feature, never used in production
 
 This plan removes both in a safe, sequenced manner.
+
+---
+
+## ⚠️ IMPORTANT: Database Migration Process
+
+**All database migrations MUST be run manually via the Vercel CLI, NOT automatically on deploy.**
+
+### Migration Workflow:
+1. **Create migration SQL file** in `prisma/migrations/YYYYMMDD_description/migration.sql`
+2. **Update `prisma/schema.prisma`** to match the migration
+3. **Run `npx prisma generate`** to update the Prisma client locally
+4. **Deploy code to Vercel** (without running migrations)
+5. **Run migration manually** via Vercel CLI:
+   ```bash
+   # Connect to production database via Vercel CLI
+   vercel env pull .env.local
+   
+   # Run the migration against production
+   npx prisma migrate deploy
+   ```
+6. **Verify migration succeeded** before proceeding
+
+### Why Manual Migrations?
+- Production database changes require careful timing
+- Allows rollback if issues are discovered
+- Separates code deployment from schema changes
+- Enables testing migration on staging first
+
+---
 
 ## Current Data State (Verified Feb 25, 2026)
 
@@ -35,6 +65,85 @@ FAILED                 9
 CANCELLED              4
 PARTIALLY_REFUNDED     3
 ```
+
+---
+
+## Execution Progress
+
+### ✅ Phase 0: COMPLETE (February 25, 2026)
+- [x] 0.1 Created `src/constants/orderStatuses.ts` with canonical status definitions
+- [x] 0.2 Created `src/lib/services/ticketing/availability.ts` as single source of truth
+- [x] 0.3 Updated code to use `computeAvailability()` instead of `EventTicketType.sold`
+- [x] 0.4 Froze category admin APIs (410 Gone for mutations)
+- [x] 0.5 Updated `src/pages/api/public/events.ts` with compatibility window
+
+### ✅ Phase 1: SeatMap Removal COMPLETE (February 25, 2026)
+- [x] 1.1 Verified 0 seatmap dependencies in production data
+- [x] 1.2 Updated `prisma/schema.prisma` - removed SeatMap, SeatReservation models and all related fields
+- [x] 1.3 Created migration `prisma/migrations/20260225000000_remove_seatmaps/migration.sql`
+- [x] 1.4 Deleted all seatmap-related files:
+  - `src/components/seatselection/` (entire directory)
+  - `src/components/admin/SeatMapEditor/` (entire directory)
+  - `src/pages/seatselection/[eventDateId].tsx`
+  - `src/pages/admin/events/seatmaps.tsx`
+  - `src/pages/admin/events/seatmaps/index.tsx`
+  - `src/pages/api/admin/seatmap/index.ts`
+  - `src/pages/api/admin/seatmap/[id].ts`
+  - `src/pages/api/seatmap_preview/[id].ts`
+  - `src/pages/api/order/reservation.ts`
+  - `src/pages/api/order/clear_reservation.ts`
+  - `src/components/admin/dialogs/SeatMapDialog.tsx`
+  - `prisma/seed-legacy-backup.ts`
+- [x] 1.5 Updated all files referencing seatmap fields (`seatType`, `seatMapId`, `seatId`, `SeatReservation`)
+- [x] 1.6 Simplified `validateOrder()` in `serverUtil.ts`
+- [x] 1.7 Updated `ManageEventDialog.tsx` and schema - removed seatmap UI
+- [x] TypeScript compilation: 0 errors ✓
+- [ ] **PENDING:** Run migration via Vercel CLI: `npx prisma migrate deploy` (migration: `20260225000000_remove_seatmaps`)
+
+### ✅ Phase 2: Category Removal COMPLETE (February 25, 2026)
+- [x] 2.1 Updated `prisma/schema.prisma` - removed Category, CategoriesOnEvents models
+- [x] 2.2 Removed `Ticket.categoryId` field and `DiscountCode.appliesToCategories` field
+- [x] 2.3 Created migration `prisma/migrations/20260225100000_remove_categories/migration.sql`
+- [x] 2.4 Deleted category-related files:
+  - `src/components/admin/CategorySelection.tsx`
+  - `src/pages/api/admin/category/` (entire directory)
+  - `src/pages/admin/events/categories.tsx`
+  - `src/pages/admin/events/migrate-categories.tsx`
+  - `src/lib/validators/orderValidator.ts` (legacy category-based validator)
+- [x] 2.5 Updated all files to use `eventTicketType` instead of `category`:
+  - `src/lib/ticket.ts`, `src/lib/send.ts`, `src/lib/invoice.ts`
+  - All `src/pages/api/` files (admin, order, payment_intent, discount, etc.)
+  - All `src/pages/` files (index, booking, payment, information, etc.)
+  - All `src/components/` files (dialogs, booking components)
+  - Utility scripts (`list-events.ts`, `list-database-data.ts`)
+- [x] 2.6 Removed `appliesToCategories` from discount code UI and APIs
+- [x] 2.7 Updated public API to return only `ticketTypes` (removed deprecated `categories` field)
+- [x] TypeScript compilation: 0 errors ✓
+- [ ] **PENDING:** Run migration via Vercel CLI: `npx prisma migrate deploy` (migration: `20260225100000_remove_categories`)
+
+### 🔲 Phase 3: Cleanup (Pending)
+
+**⚠️ IMPORTANT: Run migrations via Vercel CLI, not on deploy!**
+
+Final cleanup tasks:
+
+#### 3.1 Remove `EventTicketType.sold` Column
+1. Create migration file `prisma/migrations/YYYYMMDD_remove_sold_column/migration.sql`
+2. Update `prisma/schema.prisma` - remove `sold Int @default(0)` from EventTicketType
+3. Run `npx prisma generate` locally
+4. Deploy code to Vercel
+5. **Run migration via Vercel CLI:** `npx prisma migrate deploy`
+
+#### 3.2 Make `Ticket.eventTicketTypeId` Required
+1. **Preflight check:** Verify `SELECT COUNT(*) FROM "Ticket" WHERE "eventTicketTypeId" IS NULL` returns 0
+2. Create migration file
+3. Update `prisma/schema.prisma` - change `eventTicketTypeId Int?` to `eventTicketTypeId Int`
+4. Run `npx prisma generate` locally
+5. Deploy code to Vercel
+6. **Run migration via Vercel CLI:** `npx prisma migrate deploy`
+
+#### 3.3 Remove Null Ticket Type Safety Check
+After 3.2 migration is confirmed successful, remove the `nullTypeTickets` check from `src/lib/services/ticketing/availability.ts`
 
 ---
 

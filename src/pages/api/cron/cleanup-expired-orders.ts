@@ -2,117 +2,100 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../lib/prisma';
 
 /**
- * Cleanup expired PENDING orders
- * This releases capacity from abandoned Stripe checkout sessions
+ * Cleanup Expired Orders Cron Job
  * 
- * Should be called by Vercel Cron every 5-10 minutes
- * Or can be called manually: POST /api/cron/cleanup-expired-orders
+ * This endpoint should be called periodically (e.g., every 5 minutes) by a cron service.
+ * It expires PENDING orders that have been abandoned (no payment within expiry window).
+ * 
+ * IMPORTANT: This is critical for capacity management. PENDING orders reserve capacity,
+ * so abandoned checkouts must be cleaned up to release their tickets back to the pool.
+ * 
+ * Expiry window: 20 minutes (slightly longer than Stripe checkout session expiry of 15 min)
+ * 
+ * To set up on Vercel:
+ * 1. Add to vercel.json crons array with path "/api/cron/cleanup-expired-orders" and schedule every 5 minutes
+ * 2. Protect the endpoint with CRON_SECRET environment variable
  */
+
+const EXPIRY_MINUTES = 20;
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Verify this is either a POST request or a Vercel Cron request
-  if (req.method !== 'POST' && req.method !== 'GET') {
+  // Only allow GET (for cron) or POST
+  if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Optional: Add authorization check for manual calls
-  // For Vercel Cron, the request will have a specific header
-  const authHeader = req.headers.authorization;
-  const cronSecret = process.env.CRON_SECRET;
-  
-  // Allow if it's from Vercel Cron (check header) or has valid auth
-  const isVercelCron = req.headers['x-vercel-cron'] === '1';
-  const isAuthorized = cronSecret && authHeader === `Bearer ${cronSecret}`;
-  
-  if (!isVercelCron && !isAuthorized) {
-    console.log('❌ Unauthorized cleanup request');
-    return res.status(401).json({ error: 'Unauthorized' });
+  // Verify cron secret in production
+  if (process.env.NODE_ENV === 'production') {
+    const cronSecret = process.env.CRON_SECRET;
+    const authHeader = req.headers.authorization;
+    
+    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+      console.warn('[cleanup-expired-orders] Unauthorized cron request');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
   }
 
   try {
-    console.log('🧹 [CLEANUP] Starting expired order cleanup...');
+    const expiryThreshold = new Date(Date.now() - EXPIRY_MINUTES * 60 * 1000);
     
-    // Find PENDING orders older than 30 minutes
-    const expirationTime = new Date(Date.now() - 30 * 60 * 1000);
-    
+    console.log(`[cleanup-expired-orders] Starting cleanup. Expiring PENDING orders created before ${expiryThreshold.toISOString()}`);
+
+    // Find PENDING orders older than expiry threshold
     const expiredOrders = await prisma.order.findMany({
       where: {
         status: 'PENDING',
-        date: {
-          lt: expirationTime
-        }
+        date: { lt: expiryThreshold }
       },
-      include: {
-        tickets: {
-          select: {
-            id: true,
-            eventTicketTypeId: true
-          }
-        }
+      select: {
+        id: true,
+        date: true,
+        _count: { select: { tickets: true } }
       }
     });
 
-    console.log(`🧹 [CLEANUP] Found ${expiredOrders.length} expired PENDING orders`);
-
     if (expiredOrders.length === 0) {
-      return res.status(200).json({
-        success: true,
-        message: 'No expired orders to clean up',
+      console.log('[cleanup-expired-orders] No expired orders found');
+      return res.status(200).json({ 
+        success: true, 
+        message: 'No expired orders found',
         expiredCount: 0
       });
     }
 
-    // Process each expired order
-    let cleanedCount = 0;
-    const capacityReleased: Record<number, number> = {};
+    console.log(`[cleanup-expired-orders] Found ${expiredOrders.length} expired PENDING orders`);
 
+    // Update orders to EXPIRED status
+    const orderIds = expiredOrders.map(o => o.id);
+    
+    const updateResult = await prisma.order.updateMany({
+      where: { id: { in: orderIds } },
+      data: { status: 'EXPIRED' }
+    });
+
+    // Log details for monitoring
+    const totalTicketsReleased = expiredOrders.reduce((sum, o) => sum + o._count.tickets, 0);
+    
+    console.log(`[cleanup-expired-orders] Expired ${updateResult.count} orders, releasing ${totalTicketsReleased} ticket holds`);
+    
+    // Log individual orders for debugging if needed
     for (const order of expiredOrders) {
-      try {
-        // Count tickets by ticket type for this order
-        order.tickets.forEach(ticket => {
-          if (ticket.eventTicketTypeId) {
-            capacityReleased[ticket.eventTicketTypeId] = (capacityReleased[ticket.eventTicketTypeId] || 0) + 1;
-          }
-        });
-
-        // Update order status to EXPIRED
-        await prisma.order.update({
-          where: { id: order.id },
-          data: {
-            status: 'EXPIRED',
-            cancellationReason: 'Payment session expired (30 minutes)'
-          }
-        });
-
-        cleanedCount++;
-        console.log(`🧹 [CLEANUP] Expired order ${order.id} (${order.tickets.length} tickets)`);
-      } catch (orderError) {
-        console.error(`🧹 [CLEANUP] Error expiring order ${order.id}:`, orderError);
-      }
+      console.log(`[cleanup-expired-orders] Expired order ${order.id} (created: ${order.date?.toISOString()}, tickets: ${order._count.tickets})`);
     }
-
-    // Log capacity released per ticket type
-    console.log(`🧹 [CLEANUP] Capacity released by ticket type:`, capacityReleased);
-    for (const [ticketTypeId, count] of Object.entries(capacityReleased)) {
-      console.log(`   Ticket type ${ticketTypeId}: ${count} tickets released`);
-    }
-
-    console.log(`🧹 [CLEANUP] ✅ Cleanup complete: ${cleanedCount} orders expired, ${Object.values(capacityReleased).reduce((sum, count) => sum + count, 0)} tickets released`);
 
     return res.status(200).json({
       success: true,
-      message: `Expired ${cleanedCount} orders`,
-      expiredCount: cleanedCount,
-      ticketsReleased: Object.values(capacityReleased).reduce((sum, count) => sum + count, 0),
-      capacityReleased
+      message: `Expired ${updateResult.count} abandoned orders`,
+      expiredCount: updateResult.count,
+      ticketsReleased: totalTicketsReleased,
+      orderIds: orderIds
     });
 
   } catch (error) {
-    console.error('🧹 [CLEANUP] ❌ Error during cleanup:', error);
-    
-    return res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Cleanup failed'
+    console.error('[cleanup-expired-orders] Error:', error);
+    return res.status(500).json({ 
+      error: 'Failed to cleanup expired orders',
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }
-

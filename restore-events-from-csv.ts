@@ -65,7 +65,6 @@ async function restoreEvents(events: EventData[]) {
         data: {
           title: eventData.Name,
           description: eventData.Description || null,
-          seatType: 'free', // Default to free seating
           isActive: true,
           personalTicket: false,
           // Generate a slug from the title

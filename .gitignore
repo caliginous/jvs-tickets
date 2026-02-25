@@ -50,3 +50,4 @@ yarn-error.log*
 # Files with credentials
 test-smtp-credentials.js
 STRIPE_SETUP.md
+.env*.local

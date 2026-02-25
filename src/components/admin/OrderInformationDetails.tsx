@@ -352,32 +352,18 @@ const TicketList = ({ order, categories }: { order: any; categories: any[] }) =>
                 <div className="p-4 border-t border-gray-200 space-y-4">
                     <div className="space-y-3">
                         {tickets.map((item: any, index: number) => {
-                            // Handle both legacy categories and new ticket types safely
-                            let ticketType = null;
-                            let displayName = 'Unknown Ticket';
-
-                            if (item.eventTicketTypeId && item.eventTicketType) {
-                                // New ticket type system
-                                ticketType = item.eventTicketType;
-                                displayName = ticketType.name || 'Unknown Ticket Type';
-                            } else if (item.categoryId) {
-                                // Legacy category system
-                                const category = categories?.find(c => c.id === item.categoryId);
-                                if (!category) return null; // Skip if category not found
-                                ticketType = category;
-                                displayName = category.label || 'Unknown Category';
-                            } else {
-                                // Neither categoryId nor eventTicketTypeId - skip this ticket
-                                return null;
+                            // Get ticket type info
+                            if (!item.eventTicketTypeId || !item.eventTicketType) {
+                                return null; // Skip tickets without ticket type info
                             }
+                            
+                            const ticketType = item.eventTicketType;
+                            const displayName = ticketType.name || 'Unknown Ticket Type';
 
                             return (
                                 <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                     <div className="flex-1">
                                         <div className="text-sm font-medium text-gray-900">{displayName}</div>
-                                        {item.seatId && (
-                                            <div className="text-sm text-gray-500">Seat: {item.seatId}</div>
-                                        )}
                                         {ticketType && (
                                             <div className="text-sm text-gray-500">
                                                 Price: {formatTicketPrice(ticketType.price || 0)}

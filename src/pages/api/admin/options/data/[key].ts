@@ -30,7 +30,7 @@ const templatePreviewFill = {
                 faker.address.zipCode("#####") + " " + faker.address.city()
             ],
             products: [{
-                name: "Demo Category",
+                name: "General Admission",
                 unit_price: formatPrice(
                     20.99,
                     "USD"
@@ -71,7 +71,7 @@ const templatePreviewFill = {
     },
     "template.ticket": async (buffer: Buffer, locale) => {
         const result = await generateTicket(buffer, {
-            seatInformation: "Demo Category",
+            seatInformation: "General Admission",
             price: 20.99,
             name: faker.name.firstName() + " " + faker.name.lastName(),
             locale: locale ?? "en-GB",
