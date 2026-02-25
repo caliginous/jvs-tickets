@@ -7,12 +7,23 @@ import prisma from "../../../../lib/prisma";
 import { PermissionSection, PermissionType } from "../../../../constants/interfaces";
 import { IncomingForm } from 'formidable';
 import fs from "fs";
-import { v4 as uuid } from 'uuid';
-
-const UPLOAD_FOLDER = "coverImages";
+import { put, del } from '@vercel/blob';
 
 const deleteExisting = async (event) => {
     if (!event.coverImage) return;
+    
+    // If it's a Vercel Blob URL, delete from blob storage
+    if (event.coverImage.includes('.public.blob.vercel-storage.com')) {
+        try {
+            await del(event.coverImage);
+            console.log(`📸 Deleted blob: ${event.coverImage}`);
+        } catch (error) {
+            console.warn(`📸 Could not delete blob (may not exist): ${error.message}`);
+        }
+        return;
+    }
+    
+    // Legacy: local file deletion (for old uploads)
     if (!fs.existsSync("public" + event.coverImage)) return;
     await fs.promises.unlink("public" + event.coverImage);
 }
@@ -128,22 +139,29 @@ export default async function handler(
                 size: imageFile.size
             });
 
-            let extension = imageFile.originalFilename.split(".");
-            extension = extension[extension.length - 1];
-            const imageFilename = uuid() + "." + extension;
-
-            // Read uploaded file and store as data URL (serverless-friendly)
+            // Read uploaded file
             const image = await fs.promises.readFile(imageFile.filepath);
-            const dataUrl = `data:${imageFile.mimetype};base64,${Buffer.from(image as any).toString("base64")}`;
             
-            console.log(`📸 Created data URL, length: ${dataUrl.length}`);
+            // Generate filename for blob storage
+            const ext = imageFile.originalFilename?.split('.').pop() || 'jpg';
+            const filename = `events/cover-images/${eventIdInt}-${event.slug || 'event'}-${Date.now().toString(16)}.${ext}`;
+            
+            console.log(`📸 Uploading to Vercel Blob: ${filename}`);
+            
+            // Upload to Vercel Blob storage
+            const blob = await put(filename, image, {
+                access: 'public',
+                contentType: imageFile.mimetype || 'image/jpeg'
+            });
+            
+            console.log(`📸 Uploaded to blob storage: ${blob.url}`);
             
             await prisma.event.update({
                 where: { id: eventIdInt },
-                data: { coverImage: dataUrl }
+                data: { coverImage: blob.url }
             });
             
-            console.log(`📸 Updated event ${eventIdInt} with cover image`);
+            console.log(`📸 Updated event ${eventIdInt} with cover image URL`);
             
             await fs.promises.unlink(imageFile.filepath);
             console.log(`📸 Cleaned up temp file`);
@@ -151,7 +169,11 @@ export default async function handler(
             await revalidateBuild(res, "");
             console.log(`📸 Cover image upload completed successfully for event ${eventIdInt}`);
             
-            res.status(200).end("Cover image stored successfully!");
+            res.status(200).json({ 
+                success: true, 
+                url: blob.url,
+                message: "Cover image stored successfully!" 
+            });
             return;
         } catch (error) {
             console.error(`📸 Cover image upload failed for event ${eventIdInt}:`, error);
