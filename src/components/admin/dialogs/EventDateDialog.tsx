@@ -67,7 +67,7 @@ const EventDateEntry = ({ date, onChange, onDelete, index }: {
             label="Global Ticket Limit (optional)"
             type="number"
             value={date.totalTicketLimit || ""}
-            helperText="Maximum total tickets that can be sold across all categories. Leave empty for unlimited."
+            helperText="Maximum total tickets that can be sold across all ticket types. Leave empty for unlimited."
             onChange={(event) => onChange(index, "totalTicketLimit", event.target.value === "" ? null : parseInt(event.target.value))}
             min={1}
           />
@@ -293,7 +293,7 @@ const AddEventDate = ({ onAdd }: { onAdd: (date: EventDate) => void }) => {
               type="number"
               value={field.value || ""}
               onChange={(e) => field.onChange(e.target.value === "" ? null : parseInt(e.target.value))}
-              helperText="Maximum total tickets that can be sold across all categories. Leave empty for unlimited."
+              helperText="Maximum total tickets that can be sold across all ticket types. Leave empty for unlimited."
               min={1}
             />
           )}

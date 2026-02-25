@@ -118,7 +118,6 @@ export async function main() {
     const eventData = [
         {
             title: "Community Gardening Workshop",
-            seatType: "free",
             description: "Join us for a hands-on gardening workshop where you'll learn sustainable growing techniques and help tend our community garden.",
             venueId: venue2.id,
             ticketTypes: [
@@ -128,7 +127,6 @@ export async function main() {
         },
         {
             title: "Rosh Hashanah Community Dinner",
-            seatType: "free", 
             description: "Celebrate the Jewish New Year with a delicious vegetarian feast and meaningful community connections.",
             bespokeMessage: "Please let us know of any dietary requirements when booking. We look forward to celebrating with you!",
             venueId: venue1.id,
@@ -140,7 +138,6 @@ export async function main() {
         },
         {
             title: "Sustainable Fashion Workshop",
-            seatType: "free",
             description: "Learn to upcycle clothing and discover sustainable fashion alternatives in this interactive workshop.",
             venueId: venue1.id,
             ticketTypes: [
@@ -150,7 +147,6 @@ export async function main() {
         },
         {
             title: "Free Community Lunch",
-            seatType: "free",
             description: "A welcoming community lunch open to all. Come and meet your neighbors over delicious vegetarian food.",
             venueId: venue1.id,
             ticketTypes: [
@@ -159,7 +155,6 @@ export async function main() {
         },
         {
             title: "Young JVS Meet-up",
-            seatType: "free",
             description: "Social gathering for young members of the JVS community. Great food, great company, great conversations!",
             venueId: venue1.id,
             ticketTypes: [
@@ -168,7 +163,6 @@ export async function main() {
         },
         {
             title: "Theater Evening",
-            seatType: "free",
             description: "Special theatrical performance. A unique cultural experience for our community.",
             venueId: venue1.id,
             ticketTypes: [
@@ -184,7 +178,6 @@ export async function main() {
         const event = await prisma.event.create({
             data: {
                 title: eventInfo.title,
-                seatType: eventInfo.seatType,
                 description: eventInfo.description,
                 bespokeMessage: eventInfo.bespokeMessage,
                 slug: slug,
