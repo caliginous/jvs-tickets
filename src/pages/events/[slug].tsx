@@ -45,6 +45,7 @@ interface EventPageProps {
   theme: any;
   impressUrl: string;
   isSoldOut: boolean;
+  hasEnded: boolean;
 }
 
 export default function EventPage({
@@ -56,7 +57,8 @@ export default function EventPage({
   paymentFees,
   theme,
   impressUrl,
-  isSoldOut
+  isSoldOut,
+  hasEnded
 }: EventPageProps) {
   // Generate Open Graph meta tags for social sharing
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://tickets.jvs.org.uk';
@@ -103,6 +105,80 @@ export default function EventPage({
       minute: '2-digit'
     }, 'Europe/London', 'en-GB');
   };
+
+  // Show event ended message if no upcoming dates
+  if (hasEnded) {
+    return (
+      <>
+        <Head>
+          <title>{ogTitle} | JVS Tickets</title>
+          <meta name="description" content={ogDescription} />
+          <meta property="og:title" content={ogTitle} />
+          <meta property="og:description" content={ogDescription} />
+          <meta property="og:url" content={pageUrl} />
+          <meta property="og:type" content="website" />
+          <meta property="og:site_name" content="Jewish Vegan Society" />
+          <meta property="og:image" content={ogImage} />
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={ogTitle} />
+          <meta name="twitter:description" content={ogDescription} />
+          <meta name="twitter:image" content={ogImage} />
+        </Head>
+        <div className="min-h-screen bg-gray-50">
+          <Navbar />
+        
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            {/* Event Header */}
+            <div className="bg-white rounded-lg shadow-lg overflow-hidden mb-8">
+              {event.coverImage && (
+                <div className="aspect-video relative">
+                  <Image 
+                    src={event.coverImage} 
+                    alt={event.title}
+                    layout="fill"
+                    objectFit="cover"
+                    priority
+                  />
+                </div>
+              )}
+              <div className="p-6">
+                <h1 className="text-3xl font-bold text-gray-900 mb-4">{event.title}</h1>
+                {event.venue && (
+                  <p className="text-gray-600">
+                    {event.venue.name}{event.venue.address && `, ${event.venue.address}`}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Event Ended Banner */}
+            <div className="bg-gray-100 border-2 border-gray-300 rounded-xl p-8 text-center">
+              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-700 mb-2">This Event Has Ended</h2>
+              <p className="text-gray-600 mb-6">
+                This event has already taken place. Check out our other upcoming events!
+              </p>
+              <a 
+                href="/"
+                className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Browse Upcoming Events
+              </a>
+            </div>
+          </div>
+
+          <Footer />
+        </div>
+      </>
+    );
+  }
 
   // Show sold out message if all tickets are unavailable
   if (isSoldOut) {
@@ -320,6 +396,9 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
 
     // Get the next upcoming event date
     const eventDate = event.dates && event.dates.length > 0 ? event.dates[0] : null;
+    
+    // Check if event has ended (no upcoming dates)
+    const hasEnded = !eventDate;
 
     // Use canonical availability service for capacity calculations
     let availability = null;
@@ -391,7 +470,8 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
         paymentFees: await getOption(Options.PaymentFeesPayment),
         theme: await getOption(Options.Theme),
         impressUrl: await getOption(Options.ImpressUrl),
-        isSoldOut
+        isSoldOut,
+        hasEnded
       }
     };
   } catch (error) {
