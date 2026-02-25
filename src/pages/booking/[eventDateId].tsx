@@ -117,6 +117,14 @@ export async function getStaticProps({ params, locale }) {
       };
     }
 
+    // Check if event has any active, public ticket types
+    if (!eventDate.event.ticketTypes || eventDate.event.ticketTypes.length === 0) {
+      console.log('🔍 getStaticProps: Event has no active/public ticket types, eventDateId:', eventDateId, 'eventId:', eventDate.event.id);
+      return {
+        notFound: true
+      };
+    }
+
     const event = eventDate.event;
     const deliveryMethods = await getOption(Options.Delivery);
     const paymentMethods = await getOption(Options.PaymentProviders);
