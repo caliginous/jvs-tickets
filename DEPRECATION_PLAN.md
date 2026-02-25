@@ -95,6 +95,13 @@ export function releasesCapacity(status: string): boolean {
 // ============================================================================
 // MAINTENANCE NOTE: The Prisma schema uses String for Order.status, not an enum.
 // If new statuses are added to the codebase, update this file.
+//
+// INVARIANT: Every status MUST be categorised as either reserved or released.
+// A status that is in neither list is a bug - it means capacity calculations
+// will silently ignore those orders. When adding a new status, decide:
+//   - Does it hold tickets? → Add to CAPACITY_RESERVED_STATUSES
+//   - Are tickets released? → Add to CAPACITY_RELEASED_STATUSES
+// There is no "neutral" option. Defaulting to neither is always wrong.
 // 
 // Consider adding a unit test that queries all distinct statuses from the DB
 // and asserts they're all in ALL_ORDER_STATUSES:
@@ -176,7 +183,8 @@ export interface TicketTypeAvailability {
   available: number | null; // null = unlimited
   isSoldOut: boolean;
   // Note: isActive is NOT included. This function only returns active ticket types.
-  // If you need inactive types for admin views, create computeAvailabilityAdmin().
+  // Admin pages that need to display inactive types should use a separate function
+  // (e.g., computeAvailabilityAdmin) that includes { isActive: false } types.
 }
 
 export interface EventAvailability {
@@ -409,8 +417,8 @@ grep -r "category\|Category" src/pages/admin --include="*.tsx" -l
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // GET is allowed (read-only viewing during transition)
   if (req.method === 'GET') {
-    // ... existing GET logic - MUST return here ...
-    return res.status(200).json({ /* existing response */ });
+    // Keep existing GET logic unchanged - just ensure it returns
+    return existingGetHandler(req, res);
   }
   
   // All mutation methods are deprecated
@@ -433,8 +441,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // GET is allowed (read-only viewing during transition)
   if (req.method === 'GET') {
-    // ... existing GET logic - MUST return here ...
-    return res.status(200).json({ /* existing response */ });
+    // Keep existing GET logic unchanged - just ensure it returns
+    return existingGetHandler(req, res);
   }
   
   // All mutation methods are deprecated
@@ -1026,7 +1034,30 @@ model Ticket {
 - `src/pages/api/free-event/register.ts`
 - `src/lib/services/ticketing/orderService.ts`
 
-### 3.3 Documentation Cleanup
+### 3.3 Remove Null Ticket Type Safety Check
+
+After Phase 3.2 is deployed and verified, the `nullTypeTickets` check in `computeAvailability()` can never trigger (the column is NOT NULL). Remove it to save one query per call:
+
+**File:** `src/lib/services/ticketing/availability.ts`
+
+Delete this block:
+```typescript
+// SAFETY CHECK: Detect any tickets with null eventTicketTypeId...
+const nullTypeTickets = await prisma.ticket.count({
+  where: {
+    eventTicketTypeId: null,
+    // ...
+  }
+});
+
+if (nullTypeTickets > 0) {
+  console.error(...);
+}
+```
+
+This reduces `computeAvailability()` from 4 queries to 3.
+
+### 3.4 Documentation Cleanup
 
 Remove/update:
 - `MUI_MIGRATION_TRACKER.md` category references
