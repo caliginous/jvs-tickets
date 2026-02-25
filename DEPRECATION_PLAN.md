@@ -2,7 +2,7 @@
 
 **Created:** February 25, 2026  
 **Status:** Ready to Execute  
-**Risk Level:** Low (data migration already complete)
+**Risk Level:** Low (SeatMaps) / Medium (Categories - code entanglement)
 
 ## Executive Summary
 
@@ -22,81 +22,369 @@ This plan removes both in a safe, sequenced manner.
 | Orders with seatmaps | **0** | ✅ No historical data dependency |
 | Tickets with seatId | **0** | ✅ No historical data dependency |
 | `EventTicketType.sold` accuracy | **34%** (61/180) | ⚠️ Must compute from Tickets |
+| Discount codes using categories | **0** | ✅ All `appliesToCategories` are empty |
+| Stale PENDING orders | **0** | ✅ No phantom capacity locks |
+
+### Order Status Distribution
+```
+CONFIRMED          1,255
+PAID                 201
+EXPIRED               34
+REFUNDED              27
+FAILED                 9
+CANCELLED              4
+PARTIALLY_REFUNDED     3
+```
 
 ---
 
 ## Phase 0: Pre-Deprecation Fixes (Do First)
 
-### 0.1 Fix `sold` Column Drift
+### 0.1 Define Canonical Order Statuses
 
-The `EventTicketType.sold` column is inaccurate (119/180 wrong). Two options:
+**Create new file:** `src/constants/orderStatuses.ts`
 
-**Option A: Deprecate `sold` entirely (Recommended)**
-- Stop reading `sold` for availability checks
-- Compute availability as: `capacity - COUNT(Ticket WHERE eventTicketTypeId = X AND Order.status IN ('PAID', 'PENDING'))`
-- Keep column for now, remove in Phase 3
+```typescript
+/**
+ * Canonical order status definitions
+ * 
+ * These statuses determine capacity reservation behavior.
+ * Use these constants everywhere - never hardcode status strings.
+ */
 
-**Option B: Sync and maintain `sold`**
-- Run sync script (below)
-- Add transactional updates on every order/refund/cancel
-- Higher maintenance burden, more bug surface
+// Statuses that reserve capacity (block availability)
+export const CAPACITY_RESERVED_STATUSES = [
+  'CONFIRMED',      // Payment confirmed via webhook
+  'PAID',           // Marked paid manually (legacy)
+  'PARTIALLY_REFUNDED', // Still has valid tickets
+] as const;
 
-```sql
--- Sync script (run if choosing Option B)
-UPDATE "EventTicketType" ett
-SET sold = COALESCE(actual.cnt, 0)
-FROM (
-  SELECT t."eventTicketTypeId", COUNT(*) as cnt
-  FROM "Ticket" t 
-  JOIN "Order" o ON t."orderId" = o.id 
-  WHERE o.status = 'PAID'
-  GROUP BY t."eventTicketTypeId"
-) actual
-WHERE ett.id = actual."eventTicketTypeId";
+// Statuses that release capacity (inventory returns to pool)
+export const CAPACITY_RELEASED_STATUSES = [
+  'CANCELLED',
+  'REFUNDED', 
+  'FAILED',
+  'EXPIRED',
+] as const;
 
--- Set remaining to 0
-UPDATE "EventTicketType" 
-SET sold = 0 
-WHERE id NOT IN (
-  SELECT DISTINCT "eventTicketTypeId" 
-  FROM "Ticket" 
-  WHERE "eventTicketTypeId" IS NOT NULL
-);
+// All valid statuses
+export const ALL_ORDER_STATUSES = [
+  ...CAPACITY_RESERVED_STATUSES,
+  ...CAPACITY_RELEASED_STATUSES,
+  'PENDING', // Not counted - short-lived during checkout
+] as const;
+
+export type OrderStatus = typeof ALL_ORDER_STATUSES[number];
+export type CapacityReservedStatus = typeof CAPACITY_RESERVED_STATUSES[number];
+export type CapacityReleasedStatus = typeof CAPACITY_RELEASED_STATUSES[number];
+
+/**
+ * Check if an order status reserves capacity
+ */
+export function reservesCapacity(status: string): boolean {
+  return (CAPACITY_RESERVED_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Check if an order status releases capacity
+ */
+export function releasesCapacity(status: string): boolean {
+  return (CAPACITY_RELEASED_STATUSES as readonly string[]).includes(status);
+}
 ```
 
-### 0.2 Freeze Category Admin UI
+**Note on PENDING:** Currently 0 stale PENDING orders exist. PENDING is not counted against capacity because:
+1. Checkout is fast (Stripe hosted checkout)
+2. No expiry cleanup exists - counting PENDING would cause phantom capacity locks
+3. If this changes, add PENDING to reserved statuses AND implement `cleanup-expired-orders` cron
 
-Since all events are migrated, prevent drift by making category editing read-only:
+### 0.2 Centralized Availability Computation
 
-**File:** `src/pages/admin/categories.tsx` (if exists)
-**Action:** Add banner "Categories are deprecated. Use Ticket Types instead." and disable edit/create buttons.
+**Create new file:** `src/lib/services/ticketing/availability.ts`
 
-### 0.3 API Compatibility Window
+```typescript
+import prisma from '../../prisma';
+import { CAPACITY_RESERVED_STATUSES } from '../../../constants/orderStatuses';
+
+export interface TicketTypeAvailability {
+  eventTicketTypeId: number;
+  name: string;
+  price: number;
+  currency: string;
+  capacity: number | null;
+  sold: number;
+  available: number | null; // null = unlimited
+  isSoldOut: boolean;
+  isActive: boolean;
+}
+
+export interface EventAvailability {
+  eventDateId: number;
+  totalLimit: number | null;
+  totalSold: number;
+  totalAvailable: number | null;
+  ticketTypes: TicketTypeAvailability[];
+}
+
+/**
+ * Compute availability for an event date
+ * 
+ * This is the SINGLE SOURCE OF TRUTH for availability.
+ * Use this everywhere: validateOrder, public API, admin dashboards.
+ */
+export async function computeAvailability(eventDateId: number): Promise<EventAvailability> {
+  // Get event date with ticket types
+  const eventDate = await prisma.eventDate.findUnique({
+    where: { id: eventDateId },
+    include: {
+      event: {
+        include: {
+          ticketTypes: {
+            where: { isActive: true },
+            orderBy: { sortOrder: 'asc' }
+          }
+        }
+      }
+    }
+  });
+
+  if (!eventDate) {
+    throw new Error(`EventDate ${eventDateId} not found`);
+  }
+
+  // Get sold counts per ticket type in ONE query (not a loop)
+  const soldCounts = await prisma.ticket.groupBy({
+    by: ['eventTicketTypeId'],
+    where: {
+      eventTicketTypeId: { not: null },
+      order: {
+        eventDateId: eventDateId,
+        status: { in: [...CAPACITY_RESERVED_STATUSES] }
+      }
+    },
+    _count: { id: true }
+  });
+
+  // Build lookup map
+  const soldByType = new Map<number, number>();
+  for (const row of soldCounts) {
+    if (row.eventTicketTypeId !== null) {
+      soldByType.set(row.eventTicketTypeId, row._count.id);
+    }
+  }
+
+  // Calculate total sold across all types
+  const totalSold = Array.from(soldByType.values()).reduce((sum, count) => sum + count, 0);
+
+  // Calculate per-type availability, clamped by global limit
+  const globalLimit = eventDate.totalTicketLimit;
+  const globalRemaining = globalLimit !== null ? globalLimit - totalSold : null;
+
+  const ticketTypes: TicketTypeAvailability[] = eventDate.event.ticketTypes.map(tt => {
+    const sold = soldByType.get(tt.id) || 0;
+    
+    // Per-type available (null if no per-type capacity)
+    let typeAvailable: number | null = null;
+    if (tt.capacity !== null) {
+      typeAvailable = Math.max(0, tt.capacity - sold);
+    }
+
+    // Clamp by global availability
+    let available = typeAvailable;
+    if (globalRemaining !== null) {
+      if (available === null) {
+        available = globalRemaining;
+      } else {
+        available = Math.min(available, globalRemaining);
+      }
+    }
+
+    return {
+      eventTicketTypeId: tt.id,
+      name: tt.name,
+      price: tt.price,
+      currency: tt.currency,
+      capacity: tt.capacity,
+      sold,
+      available,
+      isSoldOut: available !== null && available <= 0,
+      isActive: tt.isActive
+    };
+  });
+
+  return {
+    eventDateId,
+    totalLimit: globalLimit,
+    totalSold,
+    totalAvailable: globalRemaining !== null ? Math.max(0, globalRemaining) : null,
+    ticketTypes
+  };
+}
+
+/**
+ * Check if specific quantities can be reserved
+ * Returns { success: true } or { success: false, error: string }
+ */
+export async function checkCapacityForOrder(
+  eventDateId: number,
+  items: Array<{ eventTicketTypeId: number; quantity: number }>
+): Promise<{ success: true } | { success: false; error: string; details?: Record<number, number> }> {
+  
+  const availability = await computeAvailability(eventDateId);
+  
+  // Check global capacity
+  const totalRequested = items.reduce((sum, item) => sum + item.quantity, 0);
+  if (availability.totalAvailable !== null && totalRequested > availability.totalAvailable) {
+    return {
+      success: false,
+      error: `Only ${availability.totalAvailable} tickets available for this event`
+    };
+  }
+
+  // Check per-type capacity
+  const insufficientTypes: Record<number, number> = {};
+  for (const item of items) {
+    const typeAvailability = availability.ticketTypes.find(
+      tt => tt.eventTicketTypeId === item.eventTicketTypeId
+    );
+
+    if (!typeAvailability) {
+      return {
+        success: false,
+        error: `Ticket type ${item.eventTicketTypeId} not found or not active`
+      };
+    }
+
+    if (typeAvailability.available !== null && item.quantity > typeAvailability.available) {
+      insufficientTypes[item.eventTicketTypeId] = typeAvailability.available;
+    }
+  }
+
+  if (Object.keys(insufficientTypes).length > 0) {
+    const typeNames = await prisma.eventTicketType.findMany({
+      where: { id: { in: Object.keys(insufficientTypes).map(Number) } },
+      select: { id: true, name: true }
+    });
+    
+    const messages = typeNames.map(tt => 
+      `${tt.name}: ${insufficientTypes[tt.id]} available`
+    );
+    
+    return {
+      success: false,
+      error: `Insufficient capacity: ${messages.join(', ')}`,
+      details: insufficientTypes
+    };
+  }
+
+  return { success: true };
+}
+```
+
+### 0.3 Deprecate `EventTicketType.sold` Column
+
+Instead of syncing the `sold` column, stop reading it entirely. The `computeAvailability()` function above computes sold from Tickets.
+
+**Do NOT run sync script** - it creates maintenance burden.
+
+**Update all code that reads `sold`:**
+- Replace `tt.sold` with call to `computeAvailability()` 
+- Or add `computeSold(eventTicketTypeId)` helper for one-off cases
+
+### 0.4 Freeze Category Admin UI
+
+**Locate category admin entry points:**
+```bash
+grep -r "category\|Category" src/pages/admin --include="*.tsx" -l
+```
+
+**For each file found:**
+1. Add deprecation banner at top of page
+2. Disable create/edit/delete buttons
+3. Keep read-only viewing for reference
+
+**Add server-side guard** to prevent mutations via API:
+
+**File:** `src/pages/api/admin/category/index.ts`
+```typescript
+// At top of POST handler
+if (req.method === 'POST') {
+  return res.status(410).json({ 
+    error: 'Category creation is deprecated. Use Event Ticket Types instead.',
+    migrationGuide: '/admin/events/ticket-types'
+  });
+}
+```
+
+**File:** `src/pages/api/admin/category/[id].ts`
+```typescript
+// At top of PUT/DELETE handlers
+if (req.method === 'PUT' || req.method === 'DELETE') {
+  return res.status(410).json({ 
+    error: 'Category modification is deprecated. Use Event Ticket Types instead.',
+    migrationGuide: '/admin/events/ticket-types'
+  });
+}
+```
+
+### 0.5 API Compatibility Window
 
 **File:** `src/pages/api/public/events.ts`
 
-Add `ticketTypes` to response alongside `categories`, mark categories deprecated:
-
 ```typescript
-// Before
-return {
-  categories: event.categories.map(...)
-}
+import { computeAvailability } from '../../lib/services/ticketing/availability';
 
-// After (transition period)
-return {
-  ticketTypes: event.ticketTypes.map(tt => ({
-    id: tt.id,
-    name: tt.name,
-    price: tt.price,
-    currency: tt.currency,
-    available: tt.capacity ? tt.capacity - computeSold(tt.id) : null,
-    isAvailable: tt.isActive && !isSoldOut(tt.id)
-  })),
-  categories: event.categories.map(...), // Keep for now
-  _deprecated: {
-    categories: "Use ticketTypes instead. Will be removed in next release."
-  }
+// In the response mapping:
+const eventsWithAvailability = await Promise.all(
+  events.map(async (event) => {
+    // Get availability for first event date (or specific date if needed)
+    const eventDateId = event.dates[0]?.id;
+    const availability = eventDateId 
+      ? await computeAvailability(eventDateId)
+      : null;
+
+    return {
+      id: event.id,
+      title: event.title,
+      // ... other fields ...
+      
+      // NEW: ticketTypes with computed availability
+      ticketTypes: availability?.ticketTypes
+        .filter(tt => tt.isActive)
+        .map(tt => ({
+          id: tt.eventTicketTypeId,
+          name: tt.name,
+          price: tt.price,
+          currency: tt.currency,
+          capacity: tt.capacity,
+          available: tt.available,
+          isAvailable: !tt.isSoldOut
+        })) ?? [],
+      
+      // DEPRECATED: categories (remove after 2 weeks)
+      categories: event.categories.map(c => ({
+        id: c.category.id,
+        name: c.category.label,
+        price: c.category.price,
+        // Bridge field for integrators
+        _migratedToTicketTypeId: findMatchingTicketType(c.category.id, availability)
+      })),
+      
+      // Deprecation notice
+      _deprecated: {
+        categories: 'Use ticketTypes instead. Will be removed 2026-03-11.'
+      },
+      
+      // Version signal
+      _apiVersion: 2
+    };
+  })
+);
+
+function findMatchingTicketType(categoryId: number, availability: EventAvailability | null): number | null {
+  // Try to find matching ticket type by name/price for bridge mapping
+  // This is best-effort for integrators
+  return null; // Implement if needed
 }
 ```
 
@@ -106,12 +394,27 @@ return {
 
 SeatMaps have zero production usage. Remove completely.
 
-### 1.1 Database Changes
+### 1.1 Pre-Removal Checklist
+
+Before merging, do repo-wide search and verify each reference is handled:
+
+```bash
+# Run these searches and check every result
+grep -r "SeatMap" src/ --include="*.ts" --include="*.tsx"
+grep -r "SeatReservation" src/ --include="*.ts" --include="*.tsx"
+grep -r "seatMapId" src/ --include="*.ts" --include="*.tsx"
+grep -r "seatType" src/ --include="*.ts" --include="*.tsx"
+grep -r "seatselection" src/ --include="*.ts" --include="*.tsx"
+grep -r "seatId" src/ --include="*.ts" --include="*.tsx"
+grep -r "include.*seatMap" src/ --include="*.ts" --include="*.tsx"
+```
+
+### 1.2 Database Changes
 
 **Migration file:** `prisma/migrations/YYYYMMDD_remove_seatmaps/migration.sql`
 
 ```sql
--- Drop SeatReservation table
+-- Drop SeatReservation table first (has FK to EventDate)
 DROP TABLE IF EXISTS "SeatReservation";
 
 -- Drop SeatMap foreign keys
@@ -128,15 +431,38 @@ ALTER TABLE "Ticket" DROP COLUMN IF EXISTS "seatId";
 DROP TABLE IF EXISTS "SeatMap";
 ```
 
-**Prisma schema changes:** Remove from `schema.prisma`:
-- `model SeatMap`
-- `model SeatReservation`
-- `Event.seatType`, `Event.seatMapId`, `Event.seatMap`
-- `Order.seatMapId`, `Order.seatMap`
-- `Ticket.seatId`
-- `EventDate.seatReservations`
+**CRITICAL:** Update `prisma/schema.prisma` in the SAME deploy:
 
-### 1.2 Code Removal
+Remove:
+```prisma
+model SeatMap { ... }
+model SeatReservation { ... }
+```
+
+Remove from Event:
+```prisma
+seatType       String        // DELETE
+seatMapId      Int?          // DELETE
+seatMap        SeatMap?      // DELETE
+```
+
+Remove from Order:
+```prisma
+seatMapId      Int?          // DELETE
+seatMap        SeatMap?      // DELETE
+```
+
+Remove from Ticket:
+```prisma
+seatId         Int?          // DELETE
+```
+
+Remove from EventDate:
+```prisma
+seatReservations    SeatReservation[]  // DELETE
+```
+
+### 1.3 Code Removal
 
 **Delete files:**
 ```
@@ -155,90 +481,99 @@ src/components/admin/SeatMapEditor/ (entire directory)
 
 | File | Change |
 |------|--------|
-| `src/constants/serverUtil.ts` | Remove `getSeatMap()`, `isTicketOccupied()` seat logic, simplify `validateOrder()` |
+| `src/constants/serverUtil.ts` | Remove `getSeatMap()`, remove seat checks from `validateOrder()` |
 | `src/constants/util.ts` | Remove `getSeatMap()`, `ticketsOccupied()`, `validateCategoriesWithSeatMap()` |
 | `src/store/reducers/orderReducer.tsx` | Remove `seatId` from Ticket type |
-| `src/pages/api/events.ts` | Remove seatMap includes |
+| `src/pages/api/events.ts` | Remove `include: { seatMap: true }` |
 | `src/pages/api/admin/events/[id].ts` | Remove seatMap handling |
-| `src/components/admin/dialogs/ManageEventDialog.tsx` | Remove seatType/seatMap fields |
+| `src/components/admin/dialogs/ManageEventDialog.tsx` | Remove seatType/seatMap form fields |
+| `src/components/admin/dialogs/ManageEventDialog.schema.ts` | Remove seatType validation |
 
-### 1.3 Simplified `validateOrder()`
+### 1.4 Simplified `validateOrder()`
 
-Replace current implementation in `src/constants/serverUtil.ts`:
+**File:** `src/constants/serverUtil.ts`
+
+Replace current implementation:
 
 ```typescript
+import { computeAvailability, checkCapacityForOrder } from '../lib/services/ticketing/availability';
+import { eventDateIsBookable } from './util';
+
+export interface TicketSelection {
+  eventTicketTypeId: number;
+  quantity: number;
+}
+
+export interface ValidationResult {
+  success: boolean;
+  error?: string;
+  userMessage?: string; // Safe for frontend display
+}
+
 export const validateOrder = async (
-  tickets: TicketSelection[], 
+  items: TicketSelection[], 
   eventDateId: number,
   checkEventBookable: boolean = true
-): Promise<[boolean, string | null]> => {
+): Promise<ValidationResult> => {
   
   // 1. Check event date exists
   const eventDate = await prisma.eventDate.findUnique({
     where: { id: eventDateId },
-    include: { 
-      event: { 
-        include: { ticketTypes: true } 
-      } 
-    }
+    include: { event: true }
   });
   
   if (!eventDate) {
-    return [false, "Event date not found"];
+    console.error(`[validateOrder] EventDate ${eventDateId} not found`);
+    return { 
+      success: false, 
+      error: 'Event date not found',
+      userMessage: 'This event is no longer available'
+    };
   }
   
   // 2. Check event is bookable (sale window)
   if (checkEventBookable && !eventDateIsBookable(eventDate)) {
-    return [false, "Event is not currently bookable"];
+    return { 
+      success: false, 
+      error: 'Event not in sale window',
+      userMessage: 'Ticket sales are not currently open for this event'
+    };
   }
   
-  // 3. Check requested ticket types exist and are active
-  const requestedTypeIds = [...new Set(tickets.map(t => t.eventTicketTypeId))];
-  const validTypeIds = eventDate.event.ticketTypes
-    .filter(tt => tt.isActive)
-    .map(tt => tt.id);
+  // 3. Validate ticket types exist and are active
+  const requestedTypeIds = [...new Set(items.map(t => t.eventTicketTypeId))];
+  const validTypes = await prisma.eventTicketType.findMany({
+    where: { 
+      id: { in: requestedTypeIds },
+      eventId: eventDate.event.id,
+      isActive: true
+    }
+  });
   
-  const invalidTypes = requestedTypeIds.filter(id => !validTypeIds.includes(id));
+  const validTypeIds = new Set(validTypes.map(tt => tt.id));
+  const invalidTypes = requestedTypeIds.filter(id => !validTypeIds.has(id));
+  
   if (invalidTypes.length > 0) {
-    return [false, `Invalid ticket types: ${invalidTypes.join(', ')}`];
+    console.error(`[validateOrder] Invalid ticket types: ${invalidTypes.join(', ')}`);
+    return { 
+      success: false, 
+      error: `Invalid ticket types: ${invalidTypes.join(', ')}`,
+      userMessage: 'Some selected ticket types are no longer available'
+    };
   }
   
-  // 4. Check capacity for each ticket type
-  for (const typeId of requestedTypeIds) {
-    const ticketType = eventDate.event.ticketTypes.find(tt => tt.id === typeId);
-    const requestedQty = tickets.filter(t => t.eventTicketTypeId === typeId).length;
-    
-    if (ticketType.capacity !== null) {
-      const currentSold = await prisma.ticket.count({
-        where: {
-          eventTicketTypeId: typeId,
-          order: { status: { in: ['PAID', 'PENDING'] } }
-        }
-      });
-      
-      if (currentSold + requestedQty > ticketType.capacity) {
-        return [false, `Insufficient capacity for ${ticketType.name}`];
-      }
-    }
+  // 4. Check capacity using centralized availability
+  const capacityCheck = await checkCapacityForOrder(eventDateId, items);
+  if (!capacityCheck.success) {
+    console.error(`[validateOrder] Capacity check failed: ${capacityCheck.error}`);
+    return {
+      success: false,
+      error: capacityCheck.error,
+      userMessage: capacityCheck.error // This message is already user-safe
+    };
   }
   
-  // 5. Check EventDate.totalTicketLimit if set
-  if (eventDate.totalTicketLimit !== null) {
-    const totalSold = await prisma.ticket.count({
-      where: {
-        order: { 
-          eventDateId: eventDateId,
-          status: { in: ['PAID', 'PENDING'] } 
-        }
-      }
-    });
-    
-    if (totalSold + tickets.length > eventDate.totalTicketLimit) {
-      return [false, "Event is sold out"];
-    }
-  }
-  
-  return [true, null];
+  return { success: true };
 };
 ```
 
@@ -248,7 +583,26 @@ export const validateOrder = async (
 
 Categories are more entangled but all data is migrated.
 
-### 2.1 Database Changes
+### 2.1 Pre-Removal Verification
+
+Run preflight checks before migration:
+
+```sql
+-- Verify no tickets depend solely on categoryId
+SELECT COUNT(*) as orphaned_tickets
+FROM "Ticket" 
+WHERE "categoryId" IS NOT NULL 
+  AND "eventTicketTypeId" IS NULL;
+-- Must return 0
+
+-- Verify no discount codes use categories
+SELECT COUNT(*) as category_discounts
+FROM "DiscountCode"
+WHERE array_length("appliesToCategories", 1) > 0;
+-- Must return 0
+```
+
+### 2.2 Database Changes
 
 **Migration file:** `prisma/migrations/YYYYMMDD_remove_categories/migration.sql`
 
@@ -263,7 +617,7 @@ ALTER TABLE "Ticket" DROP COLUMN IF EXISTS "categoryId";
 -- Drop Category table
 DROP TABLE IF EXISTS "Category";
 
--- Drop DiscountCode.appliesToCategories (if still referencing)
+-- Drop DiscountCode.appliesToCategories
 ALTER TABLE "DiscountCode" DROP COLUMN IF EXISTS "appliesToCategories";
 ```
 
@@ -274,7 +628,7 @@ ALTER TABLE "DiscountCode" DROP COLUMN IF EXISTS "appliesToCategories";
 - `Ticket.categoryId`, `Ticket.category`
 - `DiscountCode.appliesToCategories`
 
-### 2.2 Code Removal
+### 2.3 Code Removal
 
 **Delete files:**
 ```
@@ -284,50 +638,54 @@ src/pages/api/admin/category/[id].ts
 src/pages/api/admin/category/index.ts
 src/pages/api/admin/events/migrate-categories-to-ticket-types.ts
 src/pages/admin/events/migrate-categories.tsx
+src/lib/validators/orderValidator.ts  # Uses categories
 ```
 
 **Modify files:**
 
 | File | Change |
 |------|--------|
-| `src/constants/serverUtil.ts` | Remove `getCategoryTicketAmount()`, category validation in `validateOrder()` |
-| `src/constants/util.ts` | Remove `calculateTotalPrice()` category fallback, `summarizeTicketAmount()` category logic |
+| `src/constants/serverUtil.ts` | Remove `getCategoryTicketAmount()` |
+| `src/constants/util.ts` | Remove category fallback in `calculateTotalPrice()`, remove `summarizeTicketAmount()` category logic |
 | `src/components/booking/TicketSelection.tsx` | Use `eventTicketTypeId` only |
 | `src/components/booking/UnifiedBookingPage.tsx` | Remove category mapping |
 | `src/components/booking/PaymentSection.tsx` | Remove categoryId passing |
 | `src/components/form/TicketNames.tsx` | Resolve names from EventTicketType |
 | `src/components/PaymentOverview.tsx` | Use EventTicketType for display |
 | `src/pages/api/events.ts` | Remove category includes |
+| `src/pages/api/public/events.ts` | Remove categories from response |
 | `src/pages/api/admin/events/[id].ts` | Remove category handling |
 | `src/pages/api/admin/events/index.ts` | Remove category includes |
-| `src/pages/api/discount/validate.ts` | Remove category-based discount logic |
+| `src/pages/api/discount/validate.ts` | Remove category-based discount logic (already unused) |
 | `src/lib/invoice.ts` | Use EventTicketType for line items |
 | `src/lib/ticket.ts` | Remove category lookups |
+| `src/lib/services/ticketing/orderService.ts` | Remove category references |
 
-### 2.3 Update Public API
+### 2.4 Update Public API (Final)
 
 **File:** `src/pages/api/public/events.ts`
 
-Remove `categories` from response (after compatibility window):
+Remove `categories` and `_deprecated` fields:
 
 ```typescript
-// Final state
 return {
   id: event.id,
   title: event.title,
-  // ... other fields
-  ticketTypes: event.ticketTypes
-    .filter(tt => tt.isPublic && tt.isActive)
+  // ... other fields ...
+  ticketTypes: availability?.ticketTypes
+    .filter(tt => tt.isActive)
     .map(tt => ({
-      id: tt.id,
+      id: tt.eventTicketTypeId,
       name: tt.name,
       price: tt.price,
       currency: tt.currency,
       capacity: tt.capacity,
-      available: computeAvailable(tt),
-      isAvailable: computeAvailable(tt) > 0
-    }))
+      available: tt.available,
+      isAvailable: !tt.isSoldOut
+    })) ?? [],
+  _apiVersion: 2
   // NO categories field
+  // NO _deprecated field
 };
 ```
 
@@ -335,21 +693,30 @@ return {
 
 ## Phase 3: Cleanup (Low Risk)
 
-### 3.1 Remove `EventTicketType.sold` Column (If Using Option A)
+### 3.1 Remove `EventTicketType.sold` Column
 
-After confirming availability is computed correctly:
+After confirming availability is computed correctly in production:
 
 ```sql
 ALTER TABLE "EventTicketType" DROP COLUMN IF EXISTS "sold";
 ```
 
+Update Prisma schema - remove `sold Int @default(0)` from EventTicketType.
+
 ### 3.2 Make `Ticket.eventTicketTypeId` Required
 
+**Preflight check (must pass before migration):**
+```sql
+SELECT COUNT(*) FROM "Ticket" WHERE "eventTicketTypeId" IS NULL;
+-- Must return 0
+```
+
+**Migration:**
 ```sql
 ALTER TABLE "Ticket" ALTER COLUMN "eventTicketTypeId" SET NOT NULL;
 ```
 
-Update Prisma schema:
+**Update Prisma schema:**
 ```prisma
 model Ticket {
   eventTicketTypeId Int  // Remove the ?
@@ -357,53 +724,70 @@ model Ticket {
 }
 ```
 
+**Verify all write paths:**
+- `src/pages/api/order/store.ts`
+- `src/pages/api/admin/order/create-simple.ts`
+- `src/pages/api/admin/orders/create-with-ticket-types.ts`
+- `src/pages/api/free-event/register.ts`
+- `src/lib/services/ticketing/orderService.ts`
+
 ### 3.3 Documentation Cleanup
 
 Remove/update:
 - `MUI_MIGRATION_TRACKER.md` category references
-- `DOCUMENTATION_SUMMARY.md` 
-- Any API docs referencing categories
+- `DOCUMENTATION_SUMMARY.md`
+- API documentation
 
 ---
 
 ## Testing Checklist
 
-Run these tests before each phase deployment:
-
 ### Pre-Phase 1
 - [ ] All events load in admin
 - [ ] All events load on public site
 - [ ] Ticket purchase flow works end-to-end
+- [ ] `computeAvailability()` returns correct numbers
 
 ### Post-Phase 1 (SeatMaps Removed)
 - [ ] Event creation works without seatType field
 - [ ] Existing events still display correctly
 - [ ] No 500 errors on any event page
 - [ ] Ticket purchase still works
+- [ ] No `seatMap` references in any Prisma query
 
 ### Post-Phase 2 (Categories Removed)
 - [ ] Buy tickets for EventTicketType A and B
 - [ ] Verify availability decrements correctly
-- [ ] Refund an order, verify capacity handling
-- [ ] Discount codes still work (event-based, not category-based)
+- [ ] Refund an order, verify capacity returns to pool only if intended
+- [ ] All discount modes work:
+  - [ ] Per-event discount
+  - [ ] Global percentage discount
+  - [ ] Fixed amount discount
+  - [ ] Usage limits enforced
 - [ ] Invoice generation shows correct ticket type names
 - [ ] Admin order view shows correct ticket types
-- [ ] Public API returns `ticketTypes` correctly
+- [ ] Public API returns only `ticketTypes` (no `categories`)
 
 ### Post-Phase 3 (Cleanup)
-- [ ] `Ticket.eventTicketTypeId` constraint enforced
+- [ ] `Ticket.eventTicketTypeId` NOT NULL constraint enforced
 - [ ] No null eventTicketTypeId in any code path
+- [ ] All ticket creation paths set eventTicketTypeId
+
+### Additional Critical Tests
+- [ ] **Stale pending test:** Create order, leave PENDING, confirm it doesn't block capacity forever
+- [ ] **Refund + return-to-pool:** Refund should not accidentally reopen sales without admin action (if business process requires)
+- [ ] **API compatibility snapshot:** During window, both `categories` and `ticketTypes` exist; after, only `ticketTypes`
 
 ---
 
 ## Rollback Plan
 
 ### Before Each Phase
-1. Take Neon database snapshot
+1. Take Neon database snapshot: `neon branch create --name pre-phase-X-backup`
 2. Tag git commit: `git tag pre-seatmap-removal` / `pre-category-removal`
 
 ### If Issues Arise
-1. Revert git to tagged commit
+1. Revert git to tagged commit: `git revert HEAD~N` or `git reset --hard <tag>`
 2. Restore Neon snapshot
 3. Redeploy previous version
 
@@ -413,16 +797,28 @@ Run these tests before each phase deployment:
 
 | Phase | Scope | Risk | Dependencies |
 |-------|-------|------|--------------|
-| **Phase 0** | Pre-fixes | Low | None |
-| **Phase 1** | SeatMaps | Low | Phase 0 complete |
-| **Phase 2** | Categories | Medium | Phase 1 complete, API compatibility window (1-2 weeks) |
-| **Phase 3** | Cleanup | Low | Phase 2 verified in production |
+| **Phase 0** | Pre-fixes (statuses, availability, freeze UI) | Low | None |
+| **Phase 1** | Remove SeatMaps | Low | Phase 0 complete |
+| **Phase 2** | Remove Categories | Medium | Phase 1 complete + 2-week API window |
+| **Phase 3** | Cleanup (sold column, NOT NULL) | Low | Phase 2 verified in production |
 
-**Recommended approach:** Execute Phase 0 and 1 together, wait 1-2 weeks with API compatibility, then execute Phase 2 and 3.
+**Recommended approach:** 
+1. Execute Phase 0 immediately
+2. Execute Phase 1 in same deploy as Phase 0
+3. Wait 2 weeks for API compatibility
+4. Execute Phase 2
+5. Wait 1 week, verify production
+6. Execute Phase 3
 
 ---
 
 ## Files Summary
+
+### New Files to Create (Phase 0)
+```
+src/constants/orderStatuses.ts
+src/lib/services/ticketing/availability.ts
+```
 
 ### Files to Delete (17 files)
 ```
@@ -441,9 +837,10 @@ src/pages/api/admin/category/[id].ts
 src/pages/api/admin/category/index.ts
 src/pages/api/admin/events/migrate-categories-to-ticket-types.ts
 src/pages/admin/events/migrate-categories.tsx
+src/lib/validators/orderValidator.ts
 ```
 
-### Files to Modify (20+ files)
+### Files to Modify (25+ files)
 ```
 prisma/schema.prisma
 src/constants/serverUtil.ts
@@ -453,8 +850,11 @@ src/pages/api/events.ts
 src/pages/api/public/events.ts
 src/pages/api/admin/events/[id].ts
 src/pages/api/admin/events/index.ts
+src/pages/api/admin/category/index.ts (freeze mutations)
+src/pages/api/admin/category/[id].ts (freeze mutations)
 src/pages/api/discount/validate.ts
 src/components/admin/dialogs/ManageEventDialog.tsx
+src/components/admin/dialogs/ManageEventDialog.schema.ts
 src/components/booking/TicketSelection.tsx
 src/components/booking/UnifiedBookingPage.tsx
 src/components/booking/PaymentSection.tsx
@@ -463,4 +863,5 @@ src/components/PaymentOverview.tsx
 src/lib/invoice.ts
 src/lib/ticket.ts
 src/lib/services/ticketing/capacity.ts
+src/lib/services/ticketing/orderService.ts
 ```
