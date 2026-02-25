@@ -1,0 +1,20 @@
+{
+    "pay-now": "Jetzt Kaufen",
+    "processing": "Wird verarbeitet",
+    "credit-card": "Kreditkarte",
+    "credit-card-name": "Kreditkarten Inhaber",
+    "credit-card-number": "Kreditkarten Nummer",
+    "credit-card-expires": "Auslaufdatum",
+    "credit-card-cvc": "CVC Code",
+    "sepa-direct-debit": "SEPA Direct Debit",
+    "sepa-direct-debit-iban": "IBAN",
+    "klarna-description": "Nach dem Klick auf \"Jetzt Kaufen\" werden Sie zum Bezahlvorgang nach klarna weitergeleitet",
+    "invoice": "Rechnung",
+    "invoice-description": "Ihnen wird eine Rechnung per E-Mail zu gesendet!",
+    "paypal-description": "",
+    "shipping-fee": "Versandkosten",
+    "payment-fee": "Zahlungsgebühren",
+    "accept-gtc": "Ich akzeptiere die <linkGTC>AGB</linkGTC> und die <linkPrivacy>Datenschutzbestimmungen</linkPrivacy>",
+    "gtc-header": "Allgemeine Geschäftsbedingungen",
+    "privacy-header": "Datenschutzbestimmungen"
+}

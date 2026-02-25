@@ -1,0 +1,19 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {"name": "@mui/material", "message": "MUI is deprecated. Use /src/ui/"},
+          {"name": "@mui/lab", "message": "MUI is deprecated. Use /src/ui/"},
+          {"name": "@mui/icons-material", "message": "Use @heroicons/react or lucide-react"},
+          {"name": "@mui/styles", "message": "Remove JSS; use Tailwind classes"},
+          {"name": "@mui/x-date-pickers", "message": "Use react-day-picker"},
+          {"name": "@emotion/react", "message": "Remove Emotion"},
+          {"name": "@emotion/styled", "message": "Remove Emotion"}
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,75 @@
+### MONETARY AUDIT: FINAL REPORT & REMEDIATION PLAN
+
+**Objective:**
+This document summarizes the findings from a comprehensive monetary audit of the `tessera-main` codebase, as guided by `MONETARY_AMOUNT_AUDIT_PROMPT.txt`. It details the root causes of the identified bugs and outlines a clear approach to fix them, ensuring all financial data is handled consistently and correctly.
+
+---
+
+### **1. ANALYSIS RESULTS SUMMARY**
+
+The audit was conducted in three phases: database analysis, static code analysis, and end-to-end data flow tracing.
+
+*   **Database Audit (Phase 1):** ✅ **Healthy.** The database correctly stores all monetary values (`finalTotal`, `price`, etc.) as integer **pence**. The data format itself is not the source of the bugs.
+
+*   **Static Code Analysis (Phase 2):** ⚠️ **Risky.** The codebase contains numerous manual conversions (`* 100`, `/ 100`, `parseFloat`), creating many opportunities for error. The most critical risk areas were identified at the application's boundary with the Stripe API (`lib/stripe.ts` and `pages/api/webhook/stripe.ts`).
+
+*   **End-to-End Flow Trace (Phase 3):** 🚨 **Critical Failures Found.** The manual trace confirmed two major bugs that are the root cause of the reported issues.
+
+---
+
+### **2. CRITICAL BUGS IDENTIFIED**
+
+#### **Bug #1: The Purchase & Webhook Metadata Bug**
+
+This is the primary cause of orders showing incorrect amounts (e.g., £5.00 appearing as £0.05).
+
+*   **Root Cause:** When creating a Stripe Checkout Session, monetary values in the `metadata` object are being stored as pounds-formatted strings (e.g., `"5.00"`) instead of integer pence strings (e.g., `"500"`).
+    *   **Location (Writing):** `src/lib/stripe.ts` (specifically in `createCheckoutSession` for `discountAmount`).
+*   **Consequence:** The Stripe webhook handler receives this metadata. When it parses the value using `parseFloat("5.00")`, it gets the number `5`. The code then incorrectly saves this number `5` into the database as **5 pence**.
+    *   **Location (Reading):** `src/pages/api/webhook/stripe.ts`.
+*   **Failure:** The system fails to use the reliable `session.amount_total` field from Stripe (which is always in pence) as the source of truth, relying instead on the incorrectly formatted metadata.
+
+#### **Bug #2: The Refund Webhook Bug**
+
+This bug causes refunded amounts to be recorded incorrectly in the database.
+
+*   **Root Cause:** The webhook handler for the `charge.refunded` event receives the correct refund amount from Stripe in **pence** (e.g., `500`). However, the code then incorrectly divides this value by 100, converting it to **pounds** (e.g., `5.00`).
+    *   **Location:** `src/pages/api/webhook/stripe.ts`.
+*   **Consequence:** This pounds value (`5`) is then saved into a database field (`discountAmount`) that is supposed to store pence. This results in data corruption, showing a £5.00 refund as £0.05.
+
+---
+
+### **3. PROPOSED FIXES & REMEDIATION PLAN**
+
+I will execute a series of targeted fixes to resolve these bugs at their source and add preventative measures to stop them from recurring.
+
+#### **Step 1: Fix the Stripe Metadata Creation**
+
+*   **File:** `src/lib/stripe.ts`
+*   **Action:** I will modify the `createCheckoutSession` function to ensure all monetary values passed into the `metadata` object are integers in pence, converted to strings.
+    *   **Change:** `discountAmount: ... .toFixed(2)` will be changed to `discountAmount: Math.round(amountInPence).toString()`.
+*   **Outcome:** Stripe metadata will be reliable and consistent (e.g., `"500"`).
+
+#### **Step 2: Make the Stripe Webhook Robust**
+
+*   **File:** `src/pages/api/webhook/stripe.ts`
+*   **Action 1 (Purchase Flow):** I will modify the `checkout.session.completed` handler to prioritize `session.amount_total` as the source of truth for the transaction total. The metadata will only be used as a fallback, and I will add a safe parsing utility that assumes any string with a decimal is in pounds and must be converted to pence.
+*   **Action 2 (Refund Flow):** I will modify the `charge.refunded` handler to remove the `/ 100` division. The amount from Stripe (`refund.amount`) will be taken as pence and stored directly. I will also fix the logic to store refund details in the `paymentResult` JSON object instead of misusing the `discountAmount` field.
+*   **Outcome:** The webhook will correctly process both new, correctly formatted transactions and gracefully handle any old, incorrectly formatted metadata. It will store all values in pence.
+
+#### **Step 3: Add Preventative Guardrails**
+
+*   **New Utility:** I will create a small, centralized utility function (`toPenceString(amountInPence)`) in `src/lib/amountUtils.ts` to be used for all metadata creation, ensuring this bug class is eliminated permanently.
+*   **Data Cleanup (Optional):** After deployment, a one-time script can be run to scan the `Order` table for entries with suspiciously small totals created before this fix and correct them.
+
+**Conclusion:**
+This remediation plan directly addresses the root causes of the monetary inconsistencies. By fixing the data at the boundary with Stripe and making the webhook more resilient, the entire system will be aligned with the "store as pence" standard, ensuring accurate and reliable financial processing.
+
+
+
+
+
+
+
+
+

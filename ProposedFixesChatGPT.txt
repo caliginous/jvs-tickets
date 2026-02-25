@@ -1,0 +1,84 @@
+PROPOSED FIXES FOR MONETARY AMOUNT CONSISTENCY (PENCE STANDARD)
+
+Scope
+- Ensure all monetary amounts are stored and processed in pence; convert to pounds only for display.
+- Align Stripe metadata, webhooks, admin flows, refund flows, and emails to the standard.
+
+1) Webhook amounts (critical)
+- File: src/pages/api/webhook/stripe.ts
+  - checkout.session.completed
+    - Use session.amount_total (pence) as the source of truth for charged total.
+    - If metadata totals are needed, normalize via a helper that:
+      - Treats values with a decimal (e.g., "5.00", "2.5") as pounds → multiply by 100 → integer pence.
+      - Treats integer-like strings (e.g., "500") as pence → parseInt.
+    - Prefer session.amount_total when present; only fall back to normalized metadata.
+  - charge.refunded / charge.partially_refunded
+    - Store refund amounts in pence (remove division by 100 in writes).
+    - Do not write refund amounts into discountAmount; instead store refund detail inside paymentResult.refund (amount in pence, reason, timestamp, id).
+  - Logging
+    - When logging amounts, convert pence → pounds only for human-readable logs using (pence / 100).toFixed(2).
+
+2) Stripe metadata normalization (critical)
+- File: src/lib/stripe.ts
+  - createPaymentLink
+    - Expect ticket.price to be in pence and set unit_amount: Math.round(ticket.price).
+    - Metadata fields total, finalTotal, originalTotal, discountAmount must be pence strings (e.g., "500").
+  - createCheckoutSession
+    - Ensure metadata.discountAmount is stored as a pence string (remove toFixed(2) and store integer pence via Math.round(amountInPence).toString()).
+  - Add helper: normalizeAmountToPenceString(n: number): string and use for all metadata amounts.
+
+3) Admin payment link flow alignment (critical)
+- File: src/pages/api/admin/order/create-simple.ts
+  - When building ticketDetails, ensure each ticket.price is in pence:
+    - If frontend provided a price in pounds, use Math.round(frontendPrice * 100).
+    - If using category.price from DB (already pence), pass it through unchanged.
+  - Ensure calculatedTotal is the sum of (priceInPence * quantity) and compare to totalInPence (Math.round(parseFloat(total) * 100)).
+  - Pass pence prices to createPaymentLink consistently.
+
+4) Refund flow correctness (high)
+- File: src/components/admin/RefundDialog.tsx
+  - Keep: Convert entered pounds → pence before sending to API (Math.round(amount * 100)).
+- File: src/pages/api/admin/refund/index.ts
+  - Keep: Treat all amounts as pence end-to-end; compare/refund in pence.
+  - Logging: Change any logs that print pence as pounds; use (refundAmount / 100).toFixed(2).
+- File: src/lib/stripe.ts (createRefund)
+  - Either: Remove or change to accept pence directly and do not multiply by 100.
+  - Prefer routing all refunds via the API route to keep a single source of truth.
+
+5) Email formatting (high)
+- File: src/lib/services/emailTriggerService.ts and any email code in webhook
+  - Display amounts as pounds by dividing by 100 and formatting to 2 decimals.
+  - Keep all internal payload values as pence; only format for the final rendered text.
+
+6) Code pattern clean-up (medium)
+- Replace any remaining metadata writes that use toFixed(2) for amounts. Store as pence strings instead.
+- Review all / 100 and * 100 occurrences:
+  - / 100 appears only in display formatting and logs.
+  - * 100 appears only when converting user-entered pounds to pence.
+
+7) Data hygiene (recommended)
+- Identify historical rows where refund amounts or discounts were stored in pounds (very small pence values like 2, 5). Correct to pence, or retain as-is but ensure future logic ignores/overrides legacy fields in favor of paymentResult.refund.
+
+8) Guardrails (recommended)
+- Add a small helper in a shared util (e.g., src/lib/amountMetadata.ts):
+  - parseAmountStringToPence(value: string): number
+  - toPenceString(n: number): string
+- Tests:
+  - Metadata parsing: pounds string ("5.00") → 500; pence string ("500") → 500.
+  - Webhook creates order totals in pence and emails display pounds.
+  - Refund event writes pence to DB and email shows pounds.
+- Validation script:
+  - Scan code for toFixed(2) on amounts in metadata; reject builds if found.
+  - Optional DB check for non-integer or out-of-range amounts.
+
+Acceptance criteria
+- £5.00 purchase stores 500 pence in DB; Stripe receives 500; confirmation email shows £5.00.
+- £5.00 refund sends 500 pence to Stripe; order/paymentResult reflects refund in pence; email shows £5.00.
+- No remaining double/missed conversions across UI, API, Stripe, DB, emails.
+
+Notes on current code observations
+- webhook/stripe.ts currently parses metadata totals using parseFloat; change to normalized pence and prefer session.amount_total.
+- lib/stripe.ts createPaymentLink uses unit_amount: Math.round(ticket.price * 100). After aligning admin flow to pass pence, change to Math.round(ticket.price).
+- lib/stripe.ts createCheckoutSession sets metadata.discountAmount via toFixed(2). Change to pence string.
+- admin/order/create-simple.ts mixes pounds (frontend) with pence (DB). Normalize to pence when building ticketDetails and totals.
+- Refund API already handles pence correctly; ensure logs and any ancillary writes use pence internally and pounds only for display.

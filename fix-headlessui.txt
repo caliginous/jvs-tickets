@@ -1,0 +1,244 @@
+ASCII DEV INSTRUCTIONS — FIXING FAVICON 404 + HEADLESS UI  ERROR
+Date: 2025-08-22
+Owner: Frontend Team (Admin + Booking)
+Scope: Repo tessera-main
+Status: ACTION REQUIRED
+
+============================================================
+	1.	BUG: /favicon.ico RETURNS 404
+============================================================
+Symptom
+
+	•	Browser console shows: GET https://tickets.jvs.org.uk/favicon.ico 404 (Not Found)
+
+Root Cause
+	•	Next.js serves /favicon.ico from:
+	•	PAGES router → /public/favicon.ico
+	•	APP router → /app/icon.(ico|png|jpg|svg) (auto-emits /favicon.ico)
+	•	File missing in our build/deploy static assets.
+
+Fix (PAGES Router — most likely in this repo)
+	1.	Ensure the file exists:
+	•	Add a favicon file at: /public/favicon.ico  (16–32 px ICO is fine)
+	•	Optional: also include PNGs for other sizes if desired (/public/icon-192.png, /public/icon-512.png).
+	2.	Optional explicit link (not required, but OK):
+In pages/_app.tsx:
+
+import Head from “next/head”;
+export default function App({ Component, pageProps }) {
+return (
+<>
+
+
+
+<Component {…pageProps} />
+</>
+);
+}
+	3.	Deploy and verify:
+	•	Hard refresh with DevTools cache disabled.
+	•	Open /favicon.ico directly and ensure HTTP 200.
+
+Notes (if using APP Router):
+	•	Put /app/icon.png (or .ico/.svg). Next will emit /favicon.ico automatically.
+	•	Do NOT include a duplicate  unless you need a custom path.
+
+Cloudflare/Edge Deploy Reminder
+	•	Confirm your Worker/adapter serves the /public directory.
+	•	If it works locally (http://localhost:3000/favicon.ico) but 404s in prod, review static asset mapping in the deployment config.
+
+============================================================
+2) BUG: HEADLESS UI  MISSING show PROP
+
+Symptom
+	•	Repeated runtime error:
+“A  is used but it is missing a show={true | false} prop.”
+	•	White screen / client-side exception on pages like /admin/users.
+
+Confirmed Offender
+	•	src/components/admin/SeatMapEditor/SeatSelectionRowEditor.tsx:141
+
+Why It Fails
+	•	In @headlessui/react,  requires a boolean show (unlike react-transition-group’s in).
+	•	A <Transition.Child> must be nested inside a parent <Transition show={...}>.
+
+Fix Strategy
+	•	Add show={...} to the offending <Transition>.
+	•	Use an existing boolean from the component (preferred), or true if it should always render.
+
+Minimal Hotfix (stops crash now)
+	•	import { Fragment } from “react”;
+	•	import { Transition } from “@headlessui/react”;
+
+	•	import { Fragment } from “react”;
+	•	import { Transition } from “@headlessui/react”;
+// around line ~141
+
+	•	
+<Transition as={Fragment}>
+
+
+	•	
+<Transition show={true} as={Fragment}>
+   {/* existing children unchanged */}
+</Transition>
+
+
+⸻
+
+Preferred Fix (wire to real state/prop)
+	1.	Search for an existing boolean (open/isOpen/expanded/editing/isEditing/visible/selected).
+	2.	Pass that variable to show.
+
+Example (if the row has an “editing” state)
+
+import { Fragment, useState } from “react”;
+import { Transition } from “@headlessui/react”;
+
+export function SeatSelectionRowEditor(props) {
+// Example: existing or new state
+const [isEditing, setIsEditing] = useState(false);
+
+return (
+
+{/* row editor UI */}
+
+);
+}
+
+If You Have <Transition.Child> Without a Parent
+	•	// WRONG
+<Transition.Child enter=”…” leave=”…”>…</Transition.Child>
+	•	// RIGHT
+
+<Transition.Child enter=”…” leave=”…”>…</Transition.Child>
+
+
+⸻
+
+SSR/Hydration Safety (if open derives from client-only state)
+
+const [mounted, setMounted] = useState(false);
+useEffect(() => setMounted(true), []);
+<Transition show={mounted && isOpen} as={Fragment}>…
+
+============================================================
+3) RE-VERIFY + REGRESSION CHECKS
+
+Commands (run from repo root)
+
+verify favicon assets exist
+
+ls -lah public/favicon.ico || echo “missing: public/favicon.ico”
+ls -lah app/icon.* 2>/dev/null || echo “no app/icon.* found (OK if using pages router)”
+
+list all Transition occurrences
+
+rg -n “<Transition” src
+
+list child transitions (should all be inside a parent with show)
+
+rg -n “<Transition.Child” src
+
+(optional) show plain Transition tags (excludes .Root/.Child)
+
+rg -n –pcre2 ‘<Transition(?!.(?:Root|Child))’ src
+
+(optional) same-line check for missing show= on plain Transition
+
+rg -n –pcre2 ‘<Transition(?!.)[^>]*>’ src | rg -v ‘show=’
+
+Expected Output After Fix
+	•	Only these remain:
+	•	src/ui/dialog.tsx → Transition.Root (with show)
+	•	src/components/ui/Dialog.tsx → Transition.Root/Child (with show)
+	•	src/components/ui/Select.tsx → Transition.Root/Child (with show)
+	•	src/components/admin/SeatMapEditor/SeatSelectionRowEditor.tsx → fixed (now show={…})
+
+Manual QA
+	•	/admin/users loads without the “Transition” error.
+	•	Interact with modals/menus/drawers in admin; ensure animations behave.
+	•	/favicon.ico returns 200 in prod; icon visible in browser tab.
+
+Browser Cache
+	•	Open DevTools → Network → “Disable cache” → reload to avoid cached 404s/errors.
+
+============================================================
+4) OPTIONAL HARDENING (PREVENT FUTURE BREAKS)
+
+A) Create a SafeTransition wrapper (guards against undefined show)
+
+/src/components/util/SafeTransition.tsx
+
+import { Fragment } from “react”;
+import { Transition } from “@headlessui/react”;
+
+type Props = React.ComponentProps;
+export default function SafeTransition({ show, as = Fragment, …rest }: Props) {
+return <Transition show={Boolean(show)} as={as} {…rest} />;
+}
+
+Usage:
+	•	import { Transition } from “@headlessui/react”;
+
+	•	import Transition from “@/components/util/SafeTransition”;
+
+⸻
+
+B) ESLint Rule (prevent missing show in PRs)
+	•	Add a custom eslint rule or codemod check that flags <Transition without show=.
+	•	Quick heuristic script (scripts/check-transition.mjs):
+
+⸻
+
+import { readFileSync } from “fs”;
+import { globby } from “globby”;
+const files = await globby([“src/**/*.{ts,tsx}”]);
+let fail = false;
+for (const f of files) {
+const s = readFileSync(f, “utf8”);
+const lines = s.split(”\n”);
+lines.forEach((ln, i) => {
+if (ln.includes(”<Transition”)
+&& !ln.includes(”<Transition.Root”)
+&& !ln.includes(”<Transition.Child”)
+&& !ln.includes(“show=”)) {
+console.log(${f}:${i+1}: <Transition ...> missing show=);
+fail = true;
+}
+});
+}
+if (fail) process.exit(1);
+	•	Wire into CI: run before build and fail if violations found.
+
+C) Error Boundary for Admin
+	•	Wrap admin pages with an error boundary to avoid white screens and show a helpful message + stack.
+
+============================================================
+
+5) PR TEMPLATE (COPY/PASTE)
+
+Title: Fix favicon 404 + HeadlessUI Transition missing show
+
+Changes
+	•	Add /public/favicon.ico so /favicon.ico resolves in prod.
+	•	Fix  in SeatSelectionRowEditor.tsx to include show={…}.
+	•	Verified all other Transition usages are Transition.Root/Child with show.
+
+Testing
+	•	Dev: loaded /admin/users with cache disabled → no Transition error.
+	•	Clicked through admin dialogs/menus → animations OK.
+	•	Prod/stage: /favicon.ico returns 200; tab icon visible.
+
+Checks
+	•	rg -n “<Transition” src shows only expected files.
+	•	No occurrences of plain <Transition missing show=.
+	•	Lighthouse passes basic checks, no client-side exception banner.
+	•	(Optional) Added SafeTransition and lint check.
+
+============================================================
+6) ROLLBACK PLAN
+	•	Revert the specific component change if regressions found.
+	•	Keep /public/favicon.ico (harmless); switching icons is non-breaking.
+
+END OF DOC

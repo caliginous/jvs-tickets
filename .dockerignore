@@ -1,0 +1,12 @@
+node_modules
+coverage
+.nyc_output
+.next
+.github
+.env
+.env.example
+temp
+gen
+vercel.json
+README.md
+.prettierrc

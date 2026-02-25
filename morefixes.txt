@@ -1,0 +1,240 @@
+Critical
+	•	Secrets committed (.env) ………………………………. 1
+	•	Auth config issues (NextAuth) ………………………….. 2
+	•	Payment/webhook config risk (Stripe) ……………………. 1
+	•	Public debug/coverage endpoint exposed ………………….. 1
+	•	API routes without method guard ………………………… 3 (plus 1 mislocated util in /pages/api)
+
+High
+	•	Unguarded window/document usage (SSR risk) ………………. 21
+	•	dangerouslySetInnerHTML usage (XSS risk) ………………… 4
+	•	TypeScript any usage ………………………………….. 160 (top offenders listed)
+	•	ESLint disables (potentially hiding bugs) ……………….. 33
+
+Medium
+	•	Console statements in src/ …………………………….. 160
+	•	Hardcoded URLs in code (non-docs) ………………………. 75
+	•	Non-null assertion operator (!) ………………………… 7
+	•	Misplaced files under /pages/api (not handlers) ………….. 3
+	•	Email transport config mismatch ………………………… 1
+
+Low
+	•	TODO/FIXME/BUG markers ………………………………… 7
+	•	Map-without-key (heuristic) ……………………………. 30 (review suggested; many may be benign)
+
+⸻
+
+CRITICAL DETAILS (WITH EXACT REFERENCES)
+	1.	Secrets committed
+
+	•	File: .env
+Issue: Contains live secrets (DB URL, NEXTAUTH_SECRET). Do not commit. Rotate credentials immediately.
+Note: Redacted here on purpose.
+
+	2.	NextAuth config problems
+
+	•	src/pages/api/admin/auth/[…nextauth].ts:12
+secret: process.env.NEXTAUTH_SECRET || “fallback-secret-for-development”
+Risk: Fallback secret weakens JWT/session security.
+	•	src/pages/api/admin/auth/[…nextauth].ts:69
+credentials.key ?? req.headers[“Api-Key”]
+Risk: Node lowercases header names; “Api-Key” will be undefined. Use req.headers[‘api-key’].
+
+	3.	Stripe webhook configuration
+
+	•	src/pages/api/webhook/stripe.ts:7
+apiVersion: “2025-07-30.basil” as any
+Risk: Invalid/future API version string; Stripe will ignore or error. Pin to a real dated version, e.g. “2024-06-20”.
+
+	4.	Public coverage endpoint exposed
+
+	•	src/pages/api/coverage.ts
+Risk: Leaks internal coverage data in production. Add auth or disable outside dev.
+
+	5.	API routes missing method guard
+
+	•	src/pages/api/webhook/invoice.ts (no req.method check)
+	•	src/pages/api/public/events.ts (no req.method check)
+	•	src/pages/api/coverage.ts (no req.method check)
+Recommendation: Guard with allowed methods (e.g., POST-only for webhooks, GET-only for public/events).
+
+Note (misplacement under /pages/api):
+	•	src/pages/api/admin/order/taskCompletion.ts exports a function, not a handler.
+Risk: Confusing structure; may be routable. Move to /src/lib/… or similar.
+
+⸻
+
+HIGH-SEVERITY DETAILS
+
+A) Unguarded window/document usage (SSR risk)
+Examples (guard with typeof window !== ‘undefined’ or move into useEffect):
+	•	src/components/booking/OrderSummary.tsx:113  url: window.location.href
+	•	src/components/booking/OrderSummary.tsx:117  navigator.clipboard.writeText(window.location.href);
+	•	src/components/booking/OrderSummary.tsx:133  new URLSearchParams(window.location.search)
+	•	src/components/booking/OrderSummary.tsx:184  const link = document.createElement(‘a’);
+	•	src/components/admin/dialogs/SeatMapDialog.tsx:115  const tempLink = document.createElement(“a”);
+	•	src/components/admin/dialogs/OrderDetailsDialog.tsx:46  window.open(URL.createObjectURL(blob));
+	•	src/pages/admin/events/[eventId]/report.tsx:117  window.open(’’, ‘_blank’, …)
+	•	src/pages/admin/events/[eventId]/report.tsx:225  
+	•	src/pages/admin/events/[eventId]/report.tsx:228  
+	•	src/lib/recaptcha.tsx:9  window.grecaptcha…
+	•	src/components/booking/UnifiedBookingPage.tsx:113  new URLSearchParams(window.location.search)
+	•	src/components/booking/UnifiedBookingPage.tsx:186  document.body.appendChild(link);
+
+B) dangerouslySetInnerHTML usage (ensure inputs are trusted/sanitized)
+	•	src/components/StepperContainer.tsx:105            dangerouslySetInnerHTML={{__html: t(label)}}
+	•	src/components/admin/dialogs/ConfirmDialog.tsx:7   <div dangerouslySetInnerHTML={{ __html: text }} />
+	•	src/pages/refund.tsx:117                           dangerouslySetInnerHTML={{__html: t(“confirm-description”)}}
+	•	src/pages/refund.tsx:170                           dangerouslySetInnerHTML={{__html: …}}
+
+C) TypeScript any usage (erodes type safety)
+Top files by count:
+	•	src/components/admin/OrderInformationDetails.tsx ………… 13
+	•	src/components/booking/PaymentSection.tsx ………………. 10
+	•	src/components/admin/dialogs/ManageEventDialog.tsx ………. 10
+	•	src/pages/api/webhook/stripe.ts ……………………….. 8
+	•	src/components/booking/UnifiedBookingPage.tsx …………… 7
+Sample lines:
+	•	src/components/admin/OrderInformationDetails.tsx:(various)    props typed as any
+	•	src/pages/api/webhook/stripe.ts: uses “as any” on Stripe types
+Recommendation: Replace with concrete interfaces (e.g., Stripe.PaymentIntent, custom DTOs) and zod schema validation at boundaries.
+
+D) ESLint disables
+Frequent next/link rule disables (anchor tags used directly):
+	•	src/components/booking/Navbar.tsx:17,32,36,40,44,…
+	•	src/components/booking/JVSHeader.tsx:26
+	•	src/components/booking/JVSFooter.tsx:51,57,63,69
+Recommendation: Prefer … or next/link 13+ patterns to restore lint safety.
+
+⸻
+
+MEDIUM-SEVERITY DETAILS
+
+Console statements in src/ (transition to a logger or guard by env)
+Examples:
+	•	src/constants/serverUtil.ts:41,42,74,84,91,128,131,146,236 …
+	•	src/components/Step.tsx:84,94
+	•	src/components/form/AcceptGTC.tsx:26
+Recommendation: Use a logger (pino/winston) with level filtering; remove console.* in production.
+
+Hardcoded URLs (centralize to config/env)
+Top domains and examples:
+	•	www.jvs.org.uk (23)
+e.g. public paths and links spread across components.
+	•	tickets.jvs.org.uk (4)
+	•	localhost:3000 (3)  cypress.config.ts, nextauth.config.js (dev only)
+Recommendation: Create a config module and use env vars for base URLs.
+
+Non-null assertions (!) in TS
+	•	src/components/payment/StripeCard.tsx:(3 uses)
+	•	src/components/payment/StripeIBAN.tsx:(2 uses)
+	•	src/pages/api/webhook/stripe.ts:(1 use)
+Recommendation: Prefer proper narrowing; avoid “!”.
+
+Misplaced files under /pages/api (not route handlers)
+	•	src/pages/api/admin/order/taskCompletion.ts
+	•	src/pages/api/admin/translation/namespace.ts
+	•	src/pages/api/admin/translation/translation.ts
+Recommendation: Move to /src/lib or /src/server and import from API handlers.
+
+Email transport config mismatch
+	•	src/lib/email.ts:29   secure: true,  (with port 587 later)
+Recommendation: Use secure: false with port 587 (STARTTLS) or secure: true with port 465.
+
+⸻
+
+LOW-SEVERITY DETAILS
+
+TODO/FIXME markers to review
+	•	src/components/booking/UnifiedBookingPage.tsx:110  // TODO: Implement actual order processing
+	•	src/components/admin/layout/Searchbar.tsx:20       // TODO
+	•	src/pages/api/webhook/sofort.ts:73                 // TODO: handle
+	•	src/pages/api/webhook/sofort.ts:82                 // TODO: handle refunded
+	•	src/pages/api/payment_intent/sofort.ts:98          // bug in fast-xml-parser typescript declarations
+(and 2 others)
+
+Map-without-key (heuristic; may include false positives)
+Examples to review:
+	•	src/components/EventSelection/GalleryEventSelectionEntry.tsx:127 {event.dates.map(…)}
+	•	src/components/payment/PaymentMethods.tsx:41 .map((value, index) => { … })
+	•	src/components/admin/SeatMapEditor/SeatMapTemplateEditor.tsx:13/15 Array.from(…).map(…)
+Note: Some are fine (keys already present), but scan these manually.
+
+⸻
+
+RECOMMENDED FIXES (CHECKLIST)
+	1.	Secrets and env
+
+	•	Remove .env from repo. Rotate DB and NEXTAUTH_SECRET. Use environment manager (Vercel/Cloudflare/etc).
+	•	Audit commit history for leaked secrets and rotate accordingly.
+
+	2.	Auth
+
+	•	Replace fallback secret in NextAuth with required env (no default).
+	•	Fix header name: use req.headers[‘api-key’] (lowercase) or the credentials body only.
+	•	Add CSRF/Origin checks to sensitive endpoints if applicable.
+
+	3.	Webhooks / Payments
+
+	•	Set a valid Stripe apiVersion (e.g., “2024-06-20”) and remove “as any”.
+	•	Ensure bodyParser: false is defined once (it is present).
+	•	Validate incoming events and metadata with zod.
+
+	4.	API hygiene
+
+	•	Add method guards to:
+	•	src/pages/api/webhook/invoice.ts (POST only)
+	•	src/pages/api/public/events.ts (GET only)
+	•	src/pages/api/coverage.ts (DEV only + auth)
+	•	Move non-handlers out of /pages/api/*.
+
+	5.	SSR safety
+
+	•	Wrap all window/document usage in guards or move into useEffect.
+	•	src/lib/recaptcha.tsx should be a client-only util; guard access or split server/client modules.
+
+	6.	XSS hardening
+
+	•	Audit all dangerouslySetInnerHTML call sites. Ensure t() strings are trusted or sanitized.
+	•	Consider DOMPurify if any user content ever flows into these.
+
+	7.	Type safety and lint
+
+	•	Reduce any usage in:
+	•	OrderInformationDetails.tsx, PaymentSection.tsx, ManageEventDialog.tsx, webhook/stripe.ts, UnifiedBookingPage.tsx.
+	•	Remove unnecessary ESLint disables by fixing underlying issues.
+
+	8.	Logging
+
+	•	Replace console.* with a logger and gate by NODE_ENV/log level.
+
+	9.	Email
+
+	•	Align secure/port in nodemailer transport.
+
+	10.	URLs/config
+
+	•	Centralize base URLs and endpoints in a config module; read from env.
+
+⸻
+
+SPOT CHECKS YOU CAN RUN LOCALLY
+	•	Find SSR-unsafe globals:
+rg -n “window\.|document\.” src | rg -v “cypress|\.test|\.spec”
+	•	Find any/dangerous casts:
+rg -n “[: ]any\b|as any” src
+	•	Find dangerous HTML:
+rg -n “dangerouslySetInnerHTML” src
+	•	Find API handlers without method guards (quick heuristic):
+rg -n “pages/api/.*\.(ts|tsx)$” src && rg -n “export default” src/pages/api | rg -v “req\.method”
+
+⸻
+
+OPTIONAL LIBS/TOOLS TO CONSIDER
+	•	Runtime validation: zod (API and form payloads), zod-to-openapi to sync with openapi-spec.yaml.
+	•	Error monitoring: @sentry/nextjs.
+	•	Logger: pino (with pino-pretty in dev) or winston.
+	•	Security headers/CSP: next-safe or custom headers in next.config.js.
+	•	Date handling: date-fns or luxon for consistent formatting/timezones.
+
+If you want, I can produce targeted diffs (per file) for the critical fixes above.

@@ -1,0 +1,342 @@
+COMPREHENSIVE MONETARY AMOUNT AUDIT PROMPT
+
+CONTEXT & CRITICAL ISSUE:
+
+You are auditing a ticketing system that suffered from severe monetary amount inconsistencies. The system had mixed storage formats where some amounts were stored in pence (minor currency units) and others in pounds (major currency units), causing incorrect displays, refunds, and payments.
+
+CRITICAL EXAMPLES OF THE BUG:
+- £5.00 tickets displayed as £0.05 
+- £5.00 refund requests only refunded £0.05
+- Stripe charged £5.00 correctly but database stored 5 pence instead of 500 pence
+- Email confirmations showed £0.05 instead of £5.00
+
+STANDARD ADOPTED: All amounts MUST be stored in pence (500 pence = £5.00) and converted to pounds only for display (500 ÷ 100 = £5.00).
+
+================================================================================
+
+COMPREHENSIVE AUDIT INSTRUCTIONS:
+
+🗄️ 1. DATABASE STORAGE AUDIT
+
+Check these tables and fields:
+```sql
+-- Order amounts (MUST be integers in pence)
+SELECT id, finalTotal, originalTotal, discountAmount, refundAmount 
+FROM Order 
+WHERE finalTotal > 0 OR originalTotal > 0;
+
+-- Ticket type prices (MUST be integers in pence)  
+SELECT id, name, price, currency 
+FROM EventTicketType;
+
+-- Check for non-integer amounts (RED FLAG)
+SELECT * FROM Order WHERE 
+  (finalTotal IS NOT NULL AND finalTotal != FLOOR(finalTotal)) OR
+  (originalTotal IS NOT NULL AND originalTotal != FLOOR(originalTotal));
+```
+
+VALIDATION CRITERIA:
+- ✅ All amounts should be integers (pence don't have decimals)
+- ✅ Reasonable ranges: 50-100000 pence (£0.50-£1000.00)
+- ❌ RED FLAGS: Amounts like 5.00, 25.99 (likely stored as pounds)
+- ❌ RED FLAGS: Amounts < 10 pence (£0.10) or > 1000000 pence (£10000)
+
+================================================================================
+
+🎫 2. TICKET PRICING FLOW AUDIT
+
+Check these files and logic:
+```typescript
+// EventTicketType management
+src/components/admin/events/EventTicketTypesPanel.tsx
+src/pages/api/admin/events/[id]/ticket-types/[ticketTypeId].ts
+
+// Frontend ticket display
+src/pages/events/[slug].tsx
+src/components/TicketPicker.tsx
+src/components/TicketSelector.tsx
+```
+
+LOOK FOR:
+- ❌ ticketType.price / 100 in storage logic (should only be in display)
+- ❌ userInput * 100 without proper validation
+- ✅ formatTicketPrice(ticketType.price) for display
+- ✅ Integer pence values being stored
+
+SPECIFIC PATTERNS TO FIND:
+```typescript
+// ❌ WRONG - Converting during storage
+price: Math.round(userInput * 100) // Only OK if userInput is in pounds
+
+// ✅ CORRECT - Converting for display only  
+display: `£${(priceInPence / 100).toFixed(2)}`
+
+// ❌ WRONG - Storing decimal amounts
+finalTotal: 25.99 // Should be 2599
+
+// ✅ CORRECT - Storing integer pence
+finalTotal: 2599 // £25.99 in pence
+```
+
+================================================================================
+
+🛒 3. PURCHASE FLOW AUDIT
+
+Trace the complete purchase pipeline:
+
+Frontend Selection:
+```typescript
+// Check these components:
+src/components/booking/UnifiedBookingPage.tsx
+src/components/booking/StripeCardForm.tsx
+src/store/reducers/orderReducer.tsx
+```
+
+AUDIT POINTS:
+- How are ticket prices loaded into frontend state?
+- What format are prices when passed between components?
+- Are totals calculated correctly before sending to checkout?
+
+Checkout Session Creation:
+```typescript
+// Check these APIs:
+src/pages/api/stripe/create-checkout-session.ts
+src/pages/api/checkout/create-session.ts
+src/lib/stripe.ts (createCheckoutSession function)
+```
+
+CRITICAL CHECKS:
+- ❌ Look for amount / 100 or amount.toFixed(2) in metadata
+- ❌ Look for unit_amount: price * 100 (double conversion)
+- ✅ Metadata should store pence amounts as strings ("500" not "5.00")
+- ✅ Stripe line items should receive pence directly
+
+Webhook Processing:
+```typescript
+// Check these handlers:
+src/pages/api/webhook/stripe.ts
+```
+
+VALIDATION:
+- How does webhook parse Stripe metadata?
+- Are amounts stored correctly in database?
+- Does parseFloat(metadata.finalTotal) get correct values?
+
+================================================================================
+
+🗂️ 4. ORDER STORAGE & DISPLAY AUDIT
+
+Database Storage APIs:
+```typescript
+// Check all order creation endpoints:
+src/pages/api/admin/orders/create-with-ticket-types.ts
+src/pages/api/admin/order/create-simple.ts
+src/lib/services/ticketing/orderService.ts
+```
+
+Display Components:
+```typescript
+// Check all order display components:
+src/components/admin/dialogs/OrderDetailsDialog.tsx
+src/components/admin/OrderInformationDetails.tsx
+src/pages/admin/orders.tsx
+src/pages/admin/reports/index.tsx
+```
+
+AUDIT CRITERIA:
+- ❌ Any direct assignment like finalTotal: userInput (without pence conversion)
+- ❌ Any display like order.finalTotal.toFixed(2) (without ÷100)
+- ✅ Storage should be integers in pence
+- ✅ Display should use formatAmount() utility or divide by 100
+
+================================================================================
+
+💰 5. REFUND SYSTEM AUDIT
+
+Critical Components:
+```typescript
+// Refund dialog and processing:
+src/components/admin/RefundDialog.tsx
+src/pages/api/admin/refund/index.ts
+src/components/admin/dialogs/BulkDeleteOrdersDialog.tsx
+```
+
+SPECIFIC BUG PATTERNS:
+```typescript
+// ❌ WRONG - Double conversion  
+amount: Math.round(amount * 100) // If amount already in pence
+
+// ❌ WRONG - No conversion when needed
+amount: refundAmount // If refundAmount is in pounds but API expects pence
+
+// ✅ CORRECT - Proper conversion
+amount: Math.round(poundsAmount * 100) // Pounds to pence
+display: `£${(penceAmount / 100).toFixed(2)}` // Pence to pounds
+```
+
+TRACE THE FLOW:
+1. User sees order total in UI - what format?
+2. User enters refund amount - what format?  
+3. Dialog sends to API - what format?
+4. API sends to Stripe - what format?
+5. API stores in database - what format?
+
+================================================================================
+
+📧 6. EMAIL SYSTEM AUDIT
+
+Email Templates:
+```typescript
+// Check email generation:
+src/lib/services/emailTriggerService.ts
+scripts/seed-email-templates.js (template definitions)
+```
+
+EMAIL TEMPLATE PATTERNS:
+```html
+<!-- ❌ WRONG - If amount is in pence -->
+Amount: £{{refund.amount}}
+
+<!-- ✅ CORRECT - Converting pence to pounds -->  
+Amount: £{{refund.amount / 100}}
+
+<!-- Check email payload preparation -->
+amount: `£${(amountInPence / 100).toFixed(2)}`
+```
+
+================================================================================
+
+🔍 7. CODEBASE-WIDE PATTERN SEARCH
+
+Run these searches to find ALL monetary conversions:
+
+```bash
+# Find all divisions by 100 (should only be for display)
+grep -r "/ 100" --include="*.ts" --include="*.tsx" -n
+
+# Find all multiplications by 100 (should only be for pence conversion)
+grep -r "\* 100" --include="*.ts" --include="*.tsx" -n
+
+# Find toFixed(2) with amounts (check if display or storage)
+grep -r "toFixed(2)" --include="*.ts" --include="*.tsx" -n
+
+# Find parseFloat with amounts (often causes bugs)
+grep -r "parseFloat.*total\|parseFloat.*amount\|parseFloat.*price" --include="*.ts" -n
+
+# Find direct amount assignments
+grep -r "finalTotal.*:\|originalTotal.*:" --include="*.ts" -n
+```
+
+FOR EACH MATCH, VERIFY:
+- Is this display logic (÷100) or storage logic (×100)?
+- Are the input and output units consistent?
+- Could this cause pounds/pence confusion?
+
+================================================================================
+
+🧪 8. END-TO-END FLOW VALIDATION
+
+Test these complete workflows:
+
+Ticket Creation Flow:
+1. Admin sets ticket price → Database stores how?
+2. Frontend loads price → What format?
+3. User sees price → What format?
+
+Purchase Flow:
+1. User selects tickets → Frontend calculates how?
+2. Checkout created → Stripe receives what amounts?
+3. Payment succeeds → Database stores what amounts?
+4. Confirmation email → Shows what amounts?
+
+Refund Flow:
+1. Admin sees order → Displays what amount?
+2. Admin enters refund → Stored/sent as what?
+3. Stripe processes → Receives what amount?
+4. Email sent → Shows what amount?
+
+================================================================================
+
+🚨 9. RED FLAGS TO WATCH FOR
+
+IMMEDIATE DANGER SIGNS:
+- 🚩 Amounts displaying as £0.05 instead of £5.00
+- 🚩 Refunds processing £0.05 instead of £5.00  
+- 🚩 Database values like 5.00, 25.50 (should be 500, 2550)
+- 🚩 Non-integer amounts in database
+- 🚩 Stripe amounts not matching database amounts
+- 🚩 Email amounts not matching Stripe amounts
+
+CODE PATTERN RED FLAGS:
+```typescript
+// 🚩 Double conversion
+amount: Math.round(amount * 100) // When amount already in pence
+
+// 🚩 Missing conversion  
+finalTotal: userInputPounds // Should be userInputPounds * 100
+
+// 🚩 Wrong conversion direction
+display: amount * 100 // Should be amount / 100
+
+// 🚩 Metadata format confusion
+finalTotal: amount.toFixed(2) // Creates "5.00" parsed as 5 pence
+
+// 🚩 Mixed unit calculations
+total = priceInPounds + feeInPence // Units don't match
+```
+
+================================================================================
+
+📋 10. COMPREHENSIVE VALIDATION CHECKLIST
+
+For EVERY monetary amount in the system, verify:
+
+✅ Storage: Is it an integer in pence?  
+✅ Display: Does it divide by 100 to show pounds?  
+✅ API calls: Are amounts sent in expected format?  
+✅ User input: Is it converted correctly to pence?  
+✅ Calculations: Are all amounts in same units?  
+✅ External APIs: Do they receive correct format?  
+✅ Email templates: Do they format correctly?  
+✅ Error handling: Are edge cases handled?  
+
+================================================================================
+
+🎯 EXPECTED OUTCOMES
+
+After your audit, you should confirm:
+
+1. Database Consistency: All amounts are integers in pence
+2. Display Consistency: All UI shows pounds (÷100)
+3. API Consistency: All endpoints handle pence internally  
+4. Stripe Consistency: All amounts sent to Stripe in pence
+5. Email Consistency: All templates convert pence to pounds
+6. Flow Consistency: Each step uses correct units
+
+SUCCESS CRITERIA:
+- £5.00 ticket shows as £5.00 everywhere
+- £5.00 refund processes as £5.00 (not £0.05)
+- Database stores 500 pence for £5.00 amounts
+- Stripe receives 500 pence for £5.00 amounts
+- No manual /100 or *100 conversions in components
+
+================================================================================
+
+⚡ URGENCY NOTE
+
+This is a CRITICAL FINANCIAL BUG that affects real money transactions. Any inconsistency between what users see, what gets charged, and what gets refunded is a serious issue that must be fixed immediately.
+
+Broaden your analysis as wide as possible - check every file that touches monetary amounts, every calculation, every display, every API call, and every email template. The bug can hide in unexpected places due to the complex multi-layer data flow.
+
+Test with actual amounts, don't just rely on code review. Create test purchases, process test refunds, and verify the complete end-to-end flow works correctly.
+
+Remember: In monetary systems, precision matters. When in doubt, validate twice! 💰
+
+
+
+
+
+
+
+
+

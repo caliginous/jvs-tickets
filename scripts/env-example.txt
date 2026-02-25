@@ -1,0 +1,23 @@
+# Event Image Migration to Vercel Blob Storage
+# Copy this file to .env and fill in your actual values
+
+# Required: Your database connection string
+DATABASE_URL=postgres://username:password@host:port/database
+
+# Required: Your Vercel Blob Storage read/write token
+# Get this from: Vercel Dashboard → Storage → jvs-tickets-blob → Tokens
+BLOB_READ_WRITE_TOKEN=your_token_here
+
+# Optional: Custom prefix for storing images in blob storage
+# Default: events/cover-images
+BLOB_PREFIX=events/cover-images
+
+# Optional: Your Vercel Blob Storage public URL
+# Used to detect already migrated images
+# Your store: https://htoosyxcavvsuyjz.public.blob.vercel-storage.com
+BLOB_PUBLIC_BASE=https://htoosyxcavvsuyjz.public.blob.vercel-storage.com
+
+# Optional: Migration settings
+# LIMIT=100          # Process only N events (for testing)
+# CONCURRENCY=6      # Number of concurrent uploads
+# DRY_RUN=1          # Test mode (no actual uploads or DB changes)

@@ -1,0 +1,306 @@
+openapi: 3.1.0
+info:
+  title: Tessera Events API
+  description: |
+    Public REST API for accessing event metadata from the Tessera ticketing system.
+    
+    This API provides read-only access to upcoming events, including pricing, dates, availability information, and detailed ticket counts.
+    No authentication is required to access this public API.
+    
+    ## Rate Limiting
+    This API is designed for public consumption but please be respectful of server resources.
+    We recommend limiting requests to reasonable frequencies (e.g., no more than 1 request per minute per client).
+    
+    ## Data Freshness
+    Event data is updated in real-time as changes are made in the admin system.
+    Pricing and availability information reflects current state.
+    
+  version: 1.0.0
+  contact:
+    name: JVS Events
+    url: https://tickets.jvs.org.uk
+  license:
+    name: Proprietary
+    url: https://tickets.jvs.org.uk
+
+servers:
+  - url: https://tickets.jvs.org.uk
+    description: Production server
+  - url: https://jvs-tickets-5meznhmrg-dan-jacobs-projects.vercel.app
+    description: Vercel preview (requires authentication)
+
+paths:
+  /api/public/events:
+    get:
+      summary: Get all upcoming events with ticket availability
+      description: |
+        Retrieves a list of all upcoming events with their metadata including pricing, dates, availability information, and detailed ticket counts.
+        Only events with future dates are returned.
+        
+        The response includes:
+        - Basic event information (ID, title, seat type)
+        - Next upcoming date for each event
+        - Minimum ticket price across all categories
+        - Cover image if available
+        - Detailed ticket availability (total, available, sold)
+        - Per-category breakdown with pricing and availability
+        - Quick availability status indicators
+        
+      operationId: getUpcomingEvents
+      tags:
+        - Events
+      responses:
+        '200':
+          description: Successful response with list of upcoming events and ticket availability
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventSummary'
+                example:
+                  - id: 1
+                    title: "Annual Vegan Festival 2024"
+                    nextDate: "2024-12-15T18:00:00.000Z"
+                    minPrice: 25.00
+                    seatType: "General Admission"
+                    coverImage: "https://example.com/images/festival-2024.jpg"
+                    ticketAvailability:
+                      total: 200
+                      available: 150
+                      sold: 50
+                      percentageRemaining: 75
+                    categories:
+                      - id: 1
+                        name: "General Admission"
+                        price: 25.00
+                        color: "#4CAF50"
+                        maxAmount: 150
+                        sold: 50
+                        available: 100
+                        isAvailable: true
+                      - id: 2
+                        name: "VIP Package"
+                        price: 75.00
+                        color: "#FF9800"
+                        maxAmount: 50
+                        sold: 0
+                        available: 50
+                        isAvailable: true
+                    hasAvailableTickets: true
+                    isSoldOut: false
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Database connection failed"
+
+components:
+  schemas:
+    EventSummary:
+      type: object
+      description: Summary information about an upcoming event with ticket availability
+      required:
+        - id
+        - title
+        - nextDate
+        - minPrice
+        - seatType
+        - coverImage
+        - ticketAvailability
+        - categories
+        - hasAvailableTickets
+        - isSoldOut
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier for the event
+          example: 1
+        title:
+          type: string
+          description: Human-readable name of the event
+          example: "Annual Vegan Festival 2024"
+          maxLength: 255
+        nextDate:
+          type: string
+          format: date-time
+          description: |
+            The next upcoming date for this event in ISO 8601 format.
+          example: "2024-12-15T18:00:00.000Z"
+        minPrice:
+          type: number
+          format: float
+          minimum: 0
+          description: |
+            Minimum ticket price across all available categories for this event.
+            Prices are in the system's base currency.
+          example: 25.00
+        seatType:
+          type: string
+          description: |
+            Type of seating arrangement for this event.
+            Examples: "General Admission", "Reserved Seating", "Standing Room"
+          example: "General Admission"
+          maxLength: 100
+        coverImage:
+          type: string
+          format: uri
+          nullable: true
+          description: |
+            URL to the event's cover image.
+            Null if no cover image is available.
+          example: "https://example.com/images/festival-2024.jpg"
+        ticketAvailability:
+          $ref: '#/components/schemas/TicketAvailability'
+        categories:
+          type: array
+          description: List of ticket categories with availability information
+          items:
+            $ref: '#/components/schemas/CategoryAvailability'
+        hasAvailableTickets:
+          type: boolean
+          description: Whether any tickets are currently available for purchase
+          example: true
+        isSoldOut:
+          type: boolean
+          description: Whether the event is completely sold out
+          example: false
+      additionalProperties: false
+
+    TicketAvailability:
+      type: object
+      description: Overall ticket availability information for an event
+      required:
+        - total
+        - available
+        - sold
+        - percentageRemaining
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: Total ticket capacity across all categories
+          example: 200
+        available:
+          type: integer
+          minimum: 0
+          description: Number of tickets currently available for purchase
+          example: 150
+        sold:
+          type: integer
+          minimum: 0
+          description: Number of tickets already sold
+          example: 50
+        percentageRemaining:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Percentage of tickets remaining (0-100)
+          example: 75
+      additionalProperties: false
+
+    CategoryAvailability:
+      type: object
+      description: Ticket category with availability information
+      required:
+        - id
+        - name
+        - price
+        - maxAmount
+        - sold
+        - available
+        - isAvailable
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier for the category
+          example: 1
+        name:
+          type: string
+          description: Human-readable name of the ticket category
+          example: "General Admission"
+          maxLength: 100
+        price:
+          type: number
+          format: float
+          minimum: 0
+          description: Price per ticket in this category
+          example: 25.00
+        color:
+          type: string
+          nullable: true
+          description: Hex color code for the category (used in UI)
+          example: "#4CAF50"
+          pattern: '^#[0-9A-Fa-f]{6}$'
+        maxAmount:
+          type: integer
+          minimum: 0
+          description: Maximum number of tickets available in this category
+          example: 150
+        sold:
+          type: integer
+          minimum: 0
+          description: Number of tickets sold in this category
+          example: 50
+        available:
+          type: integer
+          minimum: 0
+          description: Number of tickets remaining in this category
+          example: 100
+        isAvailable:
+          type: boolean
+          description: Whether tickets are currently available in this category
+          example: true
+      additionalProperties: false
+
+    ErrorResponse:
+      type: object
+      description: Standard error response format
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Database connection failed"
+      additionalProperties: false
+
+  examples:
+    EventSummaryExample:
+      summary: Example of a complete event summary with availability
+      value:
+        id: 1
+        title: "Annual Vegan Festival 2024"
+        nextDate: "2024-12-15T18:00:00.000Z"
+        minPrice: 25.00
+        seatType: "General Admission"
+        coverImage: "https://example.com/images/festival-2024.jpg"
+        ticketAvailability:
+          total: 200
+          available: 150
+          sold: 50
+          percentageRemaining: 75
+        categories:
+          - id: 1
+            name: "General Admission"
+            price: 25.00
+            color: "#4CAF50"
+            maxAmount: 150
+            sold: 50
+            available: 100
+            isAvailable: true
+        hasAvailableTickets: true
+        isSoldOut: false
+
+tags:
+  - name: Events
+    description: Operations related to event information and metadata
+
+externalDocs:
+  description: Tessera Ticketing System Documentation
+  url: https://tickets.jvs.org.uk

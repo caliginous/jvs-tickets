@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "functions": {
+    "src/pages/**/*.tsx": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        }
+      ]
+    }
+  ],
+  "protectionBypass": true
+}

@@ -1,0 +1,700 @@
+{
+  "events": {
+    "count": 37,
+    "sample": [
+      {
+        "id": 16,
+        "title": "Community Gardening Club 29th June",
+        "seatType": "free",
+        "hasVenue": true,
+        "hasSlug": true,
+        "hasBespokeMessage": false,
+        "hasDescription": true,
+        "hasTicketTypes": false,
+        "hasCategories": true,
+        "hasCustomFields": false,
+        "datesCount": 1,
+        "venue": {
+          "name": "JVS - 853-855 Finchley Road, London NW11 8LX",
+          "city": "London"
+        },
+        "ticketTypesCount": 0,
+        "categoriesCount": 1
+      },
+      {
+        "id": 17,
+        "title": "Blessed hands",
+        "seatType": "free",
+        "hasVenue": true,
+        "hasSlug": true,
+        "hasBespokeMessage": false,
+        "hasDescription": false,
+        "hasTicketTypes": false,
+        "hasCategories": true,
+        "hasCustomFields": false,
+        "datesCount": 1,
+        "venue": {
+          "name": "JVS - 853-855 Finchley Road, London NW11 8LX",
+          "city": "London"
+        },
+        "ticketTypesCount": 0,
+        "categoriesCount": 1
+      },
+      {
+        "id": 18,
+        "title": "Community Gardening Club 13th July",
+        "seatType": "free",
+        "hasVenue": true,
+        "hasSlug": true,
+        "hasBespokeMessage": false,
+        "hasDescription": true,
+        "hasTicketTypes": false,
+        "hasCategories": true,
+        "hasCustomFields": false,
+        "datesCount": 1,
+        "venue": {
+          "name": "JVS - 853-855 Finchley Road, London NW11 8LX",
+          "city": "London"
+        },
+        "ticketTypesCount": 0,
+        "categoriesCount": 1
+      },
+      {
+        "id": 19,
+        "title": "Community Gardening Club 27th July",
+        "seatType": "free",
+        "hasVenue": true,
+        "hasSlug": true,
+        "hasBespokeMessage": false,
+        "hasDescription": true,
+        "hasTicketTypes": false,
+        "hasCategories": true,
+        "hasCustomFields": false,
+        "datesCount": 1,
+        "venue": {
+          "name": "JVS - 853-855 Finchley Road, London NW11 8LX",
+          "city": "London"
+        },
+        "ticketTypesCount": 0,
+        "categoriesCount": 1
+      },
+      {
+        "id": 20,
+        "title": "Summer social: falafel and drinks",
+        "seatType": "free",
+        "hasVenue": true,
+        "hasSlug": true,
+        "hasBespokeMessage": false,
+        "hasDescription": false,
+        "hasTicketTypes": false,
+        "hasCategories": true,
+        "hasCustomFields": false,
+        "datesCount": 1,
+        "venue": {
+          "name": "JVS - 853-855 Finchley Road, London NW11 8LX",
+          "city": "London"
+        },
+        "ticketTypesCount": 0,
+        "categoriesCount": 1
+      }
+    ]
+  },
+  "ticketTypes": {
+    "count": 10,
+    "sample": [
+      {
+        "name": "Young person",
+        "price": 200,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Young JVS meet-up: Spitafields Market"
+      },
+      {
+        "name": "Standard ticket",
+        "price": 1000,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Subversive catwalk and sustainable fashion workshop: 5th October 2025"
+      },
+      {
+        "name": "Supporter",
+        "price": 1500,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Subversive catwalk and sustainable fashion workshop: 5th October 2025"
+      },
+      {
+        "name": "Standard",
+        "price": 200,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Gardening with Pesto"
+      },
+      {
+        "name": "Supporter",
+        "price": 498,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Gardening with Pesto"
+      },
+      {
+        "name": "Standard",
+        "price": 500,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Young JVS meet-up: Spitafields Market"
+      },
+      {
+        "name": "Supporter",
+        "price": 1500,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Re-Wear the Revolution, fast fashion and eco-action"
+      },
+      {
+        "name": "Regular",
+        "price": 1000,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "Re-Wear the Revolution, fast fashion and eco-action"
+      },
+      {
+        "name": "ticket 1",
+        "price": 200,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "test"
+      },
+      {
+        "name": "Adult",
+        "price": 1000,
+        "currency": "GBP",
+        "capacity": null,
+        "sold": 0,
+        "isActive": true,
+        "eventTitle": "test2"
+      }
+    ]
+  },
+  "venues": {
+    "count": 2,
+    "sample": [
+      {
+        "name": "JVS - 853-855 Finchley Road, London NW11 8LX",
+        "city": "London",
+        "postcode": "NW11 8LX",
+        "isActive": true,
+        "eventsCount": 34,
+        "createdBy": "admin@jvs.org.uk"
+      },
+      {
+        "name": "To be confirmed",
+        "city": "London",
+        "postcode": null,
+        "isActive": true,
+        "eventsCount": 1,
+        "createdBy": "dan@danjacobs.com"
+      }
+    ]
+  },
+  "adminUsers": {
+    "count": 5,
+    "permissions": [
+      {
+        "email": "admin@jvs.org.uk",
+        "readRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ],
+        "writeRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ]
+      },
+      {
+        "email": "dan@danjacobs.com",
+        "readRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ],
+        "writeRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ]
+      },
+      {
+        "email": "info@jvs.org.uk",
+        "readRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ],
+        "writeRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ]
+      },
+      {
+        "email": "caliginous@gmail.com",
+        "readRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ],
+        "writeRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ]
+      },
+      {
+        "email": "zoe@jvs.org.uk",
+        "readRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ],
+        "writeRights": [
+          "EventManagement",
+          "UserManagement",
+          "OrderManagement",
+          "CategoryManagement",
+          "SeatMapManagement",
+          "LocalizationManagement",
+          "OptionsManagement",
+          "TaskManagement",
+          "NotificationManagement",
+          "ApiKeyManagement",
+          "EmailManagement",
+          "Orders",
+          "EventSeatMaps",
+          "Options",
+          "EventCategories",
+          "Translation"
+        ]
+      }
+    ]
+  },
+  "discountCodes": {
+    "count": 3,
+    "sample": [
+      {
+        "code": "DISCOUNTFORALEX",
+        "discountType": "percentage",
+        "discountValue": 50,
+        "isActive": true,
+        "currentUsage": 0,
+        "usageLimit": null,
+        "createdBy": "dan@danjacobs.com"
+      },
+      {
+        "code": "90PCOFF",
+        "discountType": "percentage",
+        "discountValue": 90,
+        "isActive": true,
+        "currentUsage": 0,
+        "usageLimit": null,
+        "createdBy": "dan@danjacobs.com"
+      },
+      {
+        "code": "20PCDISCOUNTRH",
+        "discountType": "percentage",
+        "discountValue": 20,
+        "isActive": true,
+        "currentUsage": 2,
+        "usageLimit": null,
+        "createdBy": "dan@danjacobs.com"
+      }
+    ]
+  },
+  "orders": {
+    "count": 501,
+    "sample": [
+      {
+        "status": "PAID",
+        "paymentType": "stripe",
+        "hasOrderItems": false,
+        "hasTickets": true,
+        "hasDiscountCode": false,
+        "eventTitle": "test",
+        "ticketsCount": 1,
+        "orderItemsCount": 0
+      },
+      {
+        "status": "PENDING",
+        "paymentType": "pending",
+        "hasOrderItems": false,
+        "hasTickets": true,
+        "hasDiscountCode": false,
+        "eventTitle": "Subversive catwalk and sustainable fashion workshop: 5th October 2025",
+        "ticketsCount": 1,
+        "orderItemsCount": 0
+      },
+      {
+        "status": "PAID",
+        "paymentType": "stripe",
+        "hasOrderItems": false,
+        "hasTickets": true,
+        "hasDiscountCode": true,
+        "eventTitle": "Rosh Hashanah Seder and Dinner",
+        "ticketsCount": 1,
+        "orderItemsCount": 0
+      },
+      {
+        "status": "PAID",
+        "paymentType": "stripe",
+        "hasOrderItems": false,
+        "hasTickets": true,
+        "hasDiscountCode": false,
+        "eventTitle": "Rosh Hashanah Seder and Dinner",
+        "ticketsCount": 1,
+        "orderItemsCount": 0
+      },
+      {
+        "status": "PAID",
+        "paymentType": "stripe",
+        "hasOrderItems": false,
+        "hasTickets": true,
+        "hasDiscountCode": false,
+        "eventTitle": "Young JVS meet-up: Spitafields Market",
+        "ticketsCount": 1,
+        "orderItemsCount": 0
+      }
+    ]
+  },
+  "emailTemplates": {
+    "count": 8,
+    "types": [
+      {
+        "name": "Refund Processed",
+        "mailType": "refund_processed",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Payment Failed",
+        "mailType": "payment_failed",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Booking Confirmation",
+        "mailType": "booking_confirmation",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Payment Link - Stripe",
+        "mailType": "payment_link",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Welcome",
+        "mailType": "welcome",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Booking Cancellation",
+        "mailType": "booking_cancellation",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Event Reminder",
+        "mailType": "event_reminder",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      },
+      {
+        "name": "Password Reset",
+        "mailType": "password_reset",
+        "isActive": true,
+        "hasSubjects": true,
+        "hasBaseHtml": true,
+        "hasBodyHtml": true,
+        "hasSamplePayload": false
+      }
+    ]
+  },
+  "categories": {
+    "count": 17,
+    "sample": [
+      {
+        "label": "Supporter ticket",
+        "price": 25,
+        "color": "#59bb59",
+        "eventsCount": 6
+      },
+      {
+        "label": "Standard Ticket",
+        "price": 20,
+        "color": "#59bb59",
+        "eventsCount": 4
+      },
+      {
+        "label": "Premium",
+        "price": 60.99,
+        "color": "#59bb59",
+        "eventsCount": 0
+      },
+      {
+        "label": "Economy",
+        "price": 30.99,
+        "color": "#59B8BB",
+        "eventsCount": 0
+      },
+      {
+        "label": "£1 for testing",
+        "price": 1,
+        "color": "#59bb59",
+        "eventsCount": 1
+      },
+      {
+        "label": "Premium",
+        "price": 60.99,
+        "color": "#59bb59",
+        "eventsCount": 0
+      },
+      {
+        "label": "Economy",
+        "price": 30.99,
+        "color": "#59B8BB",
+        "eventsCount": 0
+      },
+      {
+        "label": "Default 30",
+        "price": 30,
+        "color": "#59bb59",
+        "eventsCount": 1
+      },
+      {
+        "label": "Default 8",
+        "price": 8,
+        "color": "#59bb59",
+        "eventsCount": 1
+      },
+      {
+        "label": "Default 6",
+        "price": 6,
+        "color": "#59bb59",
+        "eventsCount": 1
+      },
+      {
+        "label": "Default 12",
+        "price": 12,
+        "color": "#59bb59",
+        "eventsCount": 1
+      },
+      {
+        "label": "Default 18",
+        "price": 18,
+        "color": "#59bb59",
+        "eventsCount": 1
+      },
+      {
+        "label": "Free Entry",
+        "price": 0,
+        "color": "#59bb59",
+        "eventsCount": 7
+      },
+      {
+        "label": "Standard Entry",
+        "price": 5,
+        "color": "#59bb59",
+        "eventsCount": 3
+      },
+      {
+        "label": "Standard Entry",
+        "price": 10,
+        "color": "#59bb59",
+        "eventsCount": 2
+      },
+      {
+        "label": "Child Entry",
+        "price": 14,
+        "color": "#59bb59",
+        "eventsCount": 3
+      },
+      {
+        "label": "Standard Entry",
+        "price": 15,
+        "color": "#59bb59",
+        "eventsCount": 8
+      }
+    ]
+  },
+  "options": {
+    "count": 6,
+    "keys": [
+      "payment.currency",
+      "payment.invoice-number",
+      "email.app-name",
+      "email.app-url",
+      "email.sender-name",
+      "email.support-email"
+    ]
+  }
+}

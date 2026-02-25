@@ -1,0 +1,348 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #FAFAFA;
+  --foreground: #263238;
+  --primary-green: #8BC34A;
+  --deep-green: #558B2F;
+  --light-leaf: #DCECC9;
+  --dark-forest: #2E7D32;
+  --coral: #FF6F61;
+  --sky-blue: #4FC3F7;
+  --lavender: #CE93D8;
+  --golden-sand: #FFCA28;
+  --off-white: #FAFAFA;
+  --warm-grey: #B0BEC5;
+  --charcoal: #263238;
+  --stone-beige: #F5F5F0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #263238;
+    --foreground: #FAFAFA;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-roboto), 'Inter', Arial, Helvetica, sans-serif;
+  line-height: 1.6;
+}
+
+/* Font family utilities */
+.font-roboto {
+  font-family: var(--font-roboto), 'Inter', Arial, Helvetica, sans-serif;
+}
+
+.font-source-sans {
+  font-family: var(--font-source-sans), 'Inter', Arial, Helvetica, sans-serif;
+}
+
+/* Prevent layout shifts and improve smoothness */
+* {
+  box-sizing: border-box;
+}
+
+/* Smooth scrolling for better UX */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Prevent layout shifts during animations */
+.ticket-card {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+  will-change: transform;
+}
+
+/* Smooth card transitions */
+.card-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateZ(0);
+  will-change: transform, box-shadow;
+}
+
+/* Smooth transitions for all interactive elements */
+button, input, select, textarea {
+  transition: all 0.2s ease-out;
+  transform: translateZ(0);
+}
+
+/* Prevent text selection during rapid clicks */
+.quantity-selector {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Smooth number transitions with stable layout */
+.quantity-number {
+  transition: all 0.2s ease-out;
+  transform: translateZ(0);
+  display: inline-block;
+  min-width: 3rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Prevent layout shifts in price displays */
+.price-display {
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  transform: translateZ(0);
+}
+
+/* Prevent button shake during rapid clicks */
+.button-no-shake {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+  touch-action: manipulation;
+}
+
+/* Prevent layout shifts in quantity controls */
+.quantity-selector button {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+  touch-action: manipulation;
+}
+
+/* Stable layout for price calculations */
+.price-calc {
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateZ(0);
+}
+
+/* Prevent any potential layout shifts */
+.no-layout-shift {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+/* Force hardware acceleration */
+.hardware-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+  will-change: transform;
+}
+
+/* Custom utility classes for the new color palette */
+.bg-primary-green { background-color: var(--primary-green); }
+.bg-deep-green { background-color: var(--deep-green); }
+.bg-light-leaf { background-color: var(--light-leaf); }
+.bg-dark-forest { background-color: var(--dark-forest); }
+.bg-coral { background-color: var(--coral); }
+.bg-sky-blue { background-color: var(--sky-blue); }
+.bg-lavender { background-color: var(--lavender); }
+.bg-golden-sand { background-color: var(--golden-sand); }
+.bg-off-white { background-color: var(--off-white); }
+.bg-stone-beige { background-color: var(--stone-beige); }
+
+.text-primary-green { color: var(--primary-green); }
+.text-deep-green { color: var(--deep-green); }
+.text-light-leaf { color: var(--light-leaf); }
+.text-dark-forest { color: var(--dark-forest); }
+.text-coral { color: var(--coral); }
+.text-sky-blue { color: var(--sky-blue); }
+.text-lavender { color: var(--lavender); }
+.text-golden-sand { color: var(--golden-sand); }
+.text-charcoal { color: var(--charcoal); }
+.text-warm-grey { color: var(--warm-grey); }
+
+/* Enhanced link styling for content areas */
+.prose a,
+.content-links a {
+  color: var(--sky-blue) !important;
+  text-decoration: underline !important;
+  text-decoration-color: var(--sky-blue) !important;
+  text-decoration-thickness: 2px !important;
+  transition: color 0.2s ease, text-decoration-color 0.2s ease !important;
+}
+
+.prose a:hover,
+.content-links a:hover {
+  color: var(--deep-green) !important;
+  text-decoration-color: var(--deep-green) !important;
+}
+
+/* Ensure links are visible in dark content */
+.prose a:visited {
+  color: var(--sky-blue) !important;
+}
+
+.prose a:focus {
+  outline: 2px solid var(--sky-blue) !important;
+  outline-offset: 2px !important;
+}
+
+/* React Day Picker Styles */
+.rdp {
+  --rdp-cell-size: 40px;
+  --rdp-accent-color: var(--primary-green);
+  --rdp-background-color: var(--light-leaf);
+  --rdp-accent-color-dark: var(--deep-green);
+  --rdp-background-color-dark: var(--dark-forest);
+  --rdp-outline: 2px solid var(--primary-green);
+  --rdp-outline-selected: 2px solid var(--deep-green);
+  margin: 1em;
+}
+
+.rdp-day_selected,
+.rdp-day_selected:focus-visible,
+.rdp-day_selected:hover {
+  color: white;
+  background-color: var(--primary-green);
+}
+
+.rdp-day_range_start,
+.rdp-day_range_end {
+  background-color: var(--deep-green);
+  color: white;
+}
+
+.rdp-day_range_middle {
+  background-color: var(--light-leaf);
+}
+
+.rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+  background-color: var(--light-leaf);
+}
+
+.rdp-button:focus-visible:not([disabled]) {
+  outline: var(--rdp-outline);
+}
+
+/* JVS Booking System Specific Styles */
+.booking-container {
+  background: linear-gradient(135deg, var(--off-white) 0%, var(--stone-beige) 100%);
+  min-height: 100vh;
+}
+
+.booking-card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 10px 25px rgba(38, 50, 56, 0.1);
+  border: 1px solid rgba(176, 190, 197, 0.2);
+  transition: all 0.3s ease;
+}
+
+.booking-card:hover {
+  box-shadow: 0 20px 40px rgba(38, 50, 56, 0.15);
+}
+
+.booking-button {
+  background: linear-gradient(135deg, var(--primary-green) 0%, var(--deep-green) 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(139, 195, 74, 0.3);
+}
+
+.booking-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(139, 195, 74, 0.4);
+}
+
+.booking-button:active {
+  transform: translateY(0);
+}
+
+.progress-step {
+  transition: all 0.3s ease;
+}
+
+.progress-step.active {
+  background: linear-gradient(135deg, var(--primary-green) 0%, var(--deep-green) 100%);
+  box-shadow: 0 4px 12px rgba(139, 195, 74, 0.3);
+}
+
+.progress-step.completed {
+  background: var(--deep-green);
+  box-shadow: 0 2px 8px rgba(85, 139, 47, 0.3);
+}
+
+
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

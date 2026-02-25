@@ -1,0 +1,87 @@
+### MONETARY AUDIT ANALYSIS PLAN & REMEDIATION OVERVIEW (CODEX)
+
+**Objective Recap:**
+Follow `MONETARY_AMOUNT_AUDIT_PROMPT.txt` to audit the Tessera ticketing system, identify every source of pounds/pence inconsistency, and prepare a remediation strategy before changing any code.
+
+---
+
+### 1. ANALYSIS TASKS
+To understand the issue fully and ensure codebase consistency, the following tasks were executed:
+
+1. **Database Storage Audit**
+   - Verify all monetary columns (`finalTotal`, `originalTotal`, `discountAmount`, ticket `price`) are stored as integer pence.
+   - Flag non-integer or implausible values (<10 or >1,000,000 pence).
+
+2. **Static Code Pattern Scan**
+   - Project-wide search for `/ 100`, `* 100`, `.toFixed(2)`, and `parseFloat` usage to locate every conversion, format, and metadata write.
+   - Categorize findings by risk (display-only vs. storage/API logic).
+
+3. **End-to-End Flow Trace**
+   - **Purchase flow:** Admin price entry → Stripe Checkout session → Webhook → DB storage.
+   - **Refund flow:** Admin refund dialog → Refund API → Stripe refund → Webhook storage.
+   - **Ticket pricing flow:** Admin management → DB storage → Public event page display.
+
+4. **Reporting & Remediation Planning**
+   - Summarize findings.
+   - Define fix plan and guardrails before making any code changes.
+
+---
+
+### 2. AUDIT FINDINGS
+
+#### ✅ Database Integrity
+- All order and ticket amounts are stored as integers in pence.
+- Only one suspicious historical order (80p final total) was identified; storage format remains correct.
+
+#### ⚠️ Code Risks (Pattern Scan)
+- Multiple manual conversions exist across the codebase.
+- Two hotspots identified around Stripe metadata and webhook parsing.
+
+#### 🚨 Critical Bugs
+1. **Purchase Metadata Bug**
+   - `src/lib/stripe.ts` writes Stripe metadata fields (`finalTotal`, `discountAmount`, etc.) using `.toFixed(2)`, producing pounds-formatted strings (e.g., "5.00").
+   - `src/pages/api/webhook/stripe.ts` parses these strings with `parseFloat`, yielding a numeric value in pounds (e.g., 5), then stores it as pence, corrupting order totals.
+
+2. **Refund Webhook Bug**
+   - `src/pages/api/webhook/stripe.ts` divides Stripe’s `refund.amount` (already pence) by 100 before persisting, causing refunded values to be written as pounds (e.g., 5 instead of 500).
+   - The webhook also writes refund amounts into `discountAmount`, mixing semantics.
+
+---
+
+### 3. REMEDIATION PLAN
+
+#### Step 1: Standardize Stripe Metadata Writes
+- **File:** `src/lib/stripe.ts`
+- Introduce helpers (e.g., `toPenceString(valueInPence)`).
+- Ensure all metadata values are stored as pence strings ("500").
+
+#### Step 2: Harden Webhook Processing
+- **File:** `src/pages/api/webhook/stripe.ts`
+  - Use `session.amount_total` (pence) as the canonical purchase total; only fall back to metadata after safe normalization (decimal strings → pounds ×100).
+  - For refunds, keep Stripe’s `refund.amount` in pence, store refund details in a dedicated structure within `paymentResult`, and stop using `/ 100`.
+
+#### Step 3: Add Guardrails
+- Centralize metadata formatting utilities in `src/lib/amountUtils.ts`.
+- Optional: Add Jest tests to cover metadata creation/parsing and webhook outcomes.
+- Optional data cleanup script to correct preexisting orders with small totals caused by prior bugs.
+
+---
+
+### 4. NEXT STEPS BEFORE FIXES
+1. Confirm remediation plan approval.
+2. Implement code changes per steps above.
+3. Run automated tests and manual purchase/refund validations.
+4. Deploy and monitor Stripe/webhook logs for confirmation.
+
+---
+
+**Status:** Analysis complete. Awaiting approval to proceed with remediation implementation.
+
+
+
+
+
+
+
+
+
