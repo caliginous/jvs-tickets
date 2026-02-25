@@ -91,6 +91,22 @@ export function reservesCapacity(status: string): boolean {
 export function releasesCapacity(status: string): boolean {
   return (CAPACITY_RELEASED_STATUSES as readonly string[]).includes(status);
 }
+
+// ============================================================================
+// MAINTENANCE NOTE: The Prisma schema uses String for Order.status, not an enum.
+// If new statuses are added to the codebase, update this file.
+// 
+// Consider adding a unit test that queries all distinct statuses from the DB
+// and asserts they're all in ALL_ORDER_STATUSES:
+//
+//   const dbStatuses = await prisma.order.findMany({
+//     select: { status: true },
+//     distinct: ['status']
+//   });
+//   for (const { status } of dbStatuses) {
+//     expect(ALL_ORDER_STATUSES).toContain(status);
+//   }
+// ============================================================================
 ```
 
 **Note on PENDING:** Currently 0 stale PENDING orders exist. PENDING is not counted against capacity because:
@@ -136,10 +152,14 @@ Full refunds (REFUNDED status) DO release capacity, but the ticket rows remain i
 **Create new file:** `src/lib/services/ticketing/availability.ts`
 
 ```typescript
-// NOTE: This file lives at src/lib/services/ticketing/availability.ts
-// Import paths are relative to that location
-import prisma from '../../prisma'; // src/lib/prisma.ts
-import { CAPACITY_RESERVED_STATUSES } from '../../../constants/orderStatuses'; // src/constants/orderStatuses.ts
+// File: src/lib/services/ticketing/availability.ts
+// Verify these import paths match your project structure before copy-pasting
+import prisma from '@/lib/prisma';
+import { CAPACITY_RESERVED_STATUSES } from '@/constants/orderStatuses';
+
+// If your project doesn't use path aliases, use relative paths:
+// import prisma from '../../prisma';
+// import { CAPACITY_RESERVED_STATUSES } from '../../../constants/orderStatuses';
 
 export interface TicketTypeAvailability {
   eventTicketTypeId: number;
@@ -150,7 +170,8 @@ export interface TicketTypeAvailability {
   sold: number;
   available: number | null; // null = unlimited
   isSoldOut: boolean;
-  isActive: boolean;
+  // Note: isActive is NOT included. This function only returns active ticket types.
+  // If you need inactive types for admin views, create computeAvailabilityAdmin().
 }
 
 export interface EventAvailability {
@@ -165,8 +186,14 @@ export interface EventAvailability {
 /**
  * Compute availability for an event date
  * 
- * This is the SINGLE SOURCE OF TRUTH for availability.
+ * This is the SINGLE SOURCE OF TRUTH for availability numbers.
  * Use this everywhere: validateOrder, public API, admin dashboards.
+ * 
+ * IMPORTANT: This function assumes ticket types exist and are active (via where filter).
+ * validateOrder() performs the "does this ticket type exist?" check separately,
+ * BEFORE calling checkCapacityForOrder(), to provide better error messages.
+ * Don't refactor that check into this function - you'd lose the distinction between
+ * "ticket type doesn't exist" and "ticket type exists but is sold out".
  */
 export async function computeAvailability(eventDateId: number): Promise<EventAvailability> {
   // Get event date with ticket types
@@ -273,9 +300,7 @@ export async function computeAvailability(eventDateId: number): Promise<EventAva
       capacity: tt.capacity,
       sold,
       available,
-      isSoldOut: available !== null && available <= 0,
-      // Note: isActive will always be true here due to the where filter.
-      // We include it anyway for type completeness, but it's redundant in this context.
+      isSoldOut: available !== null && available <= 0
     };
   });
 
@@ -423,6 +448,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 - `410 Gone` - Resource (mutation capability) existed but is now permanently unavailable
 - `405 Method Not Allowed` - For truly unsupported methods (HEAD, OPTIONS, etc.)
 
+**Note on sequencing:** These API files (`category/index.ts`, `category/[id].ts`) are frozen here in Phase 0.4, then deleted in Phase 2.3. The freeze prevents drift during the compatibility window - if someone tries to edit categories via the admin UI or API, they get a clear error instead of succeeding and creating data we'd need to migrate again.
+
 ### 0.5 API Compatibility Window
 
 **File:** `src/pages/api/public/events.ts`
@@ -476,8 +503,8 @@ const eventsWithAvailability = await Promise.all(
         id: c.category.id,
         name: c.category.label,
         price: c.category.price,
-        // Bridge field for integrators
-        _migratedToTicketTypeId: findMatchingTicketType(c.category.id, availability)
+        // Bridge field for integrators - maps to the EventTicketType that replaced this category
+        _migratedToTicketTypeId: findMatchingTicketType(c.category, availability)
       })),
       
       // Deprecation notice
@@ -491,28 +518,96 @@ const eventsWithAvailability = await Promise.all(
   })
 );
 
-function findMatchingTicketType(categoryId: number, availability: EventAvailability | null): number | null {
-  // Try to find matching ticket type by name/price for bridge mapping
-  // This is best-effort for integrators
-  return null; // Implement if needed
+/**
+ * Find the EventTicketType that corresponds to a migrated category.
+ * 
+ * Migration logic (from migrate-categories-to-ticket-types.ts):
+ * - category.label → ticketType.name
+ * - category.price (pounds) → ticketType.price (pence, via Math.round(price * 100))
+ * 
+ * Matching strategy:
+ * 1. Exact name match (case-insensitive, trimmed)
+ * 2. If multiple matches, also match on price
+ * 3. If still ambiguous or no match, return null and log
+ */
+function findMatchingTicketType(
+  category: { id: number; label: string; price: number },
+  availability: EventAvailability | null
+): number | null {
+  if (!availability || availability.ticketTypes.length === 0) {
+    return null;
+  }
+
+  const normalizedCategoryName = category.label.trim().toLowerCase();
+  const categoryPriceInPence = Math.round(category.price * 100);
+
+  // Find all ticket types with matching name
+  const nameMatches = availability.ticketTypes.filter(
+    tt => tt.name.trim().toLowerCase() === normalizedCategoryName
+  );
+
+  if (nameMatches.length === 0) {
+    console.warn(
+      `[findMatchingTicketType] No ticket type found for category "${category.label}" (id=${category.id})`
+    );
+    return null;
+  }
+
+  if (nameMatches.length === 1) {
+    return nameMatches[0].eventTicketTypeId;
+  }
+
+  // Multiple name matches - narrow by price
+  const priceMatches = nameMatches.filter(tt => tt.price === categoryPriceInPence);
+
+  if (priceMatches.length === 1) {
+    return priceMatches[0].eventTicketTypeId;
+  }
+
+  if (priceMatches.length === 0) {
+    console.warn(
+      `[findMatchingTicketType] Multiple ticket types match name "${category.label}" but none match price £${category.price}. Returning first match.`
+    );
+    return nameMatches[0].eventTicketTypeId;
+  }
+
+  // Multiple price matches too - ambiguous, return first and log
+  console.warn(
+    `[findMatchingTicketType] Ambiguous: ${priceMatches.length} ticket types match name "${category.label}" and price £${category.price}. Returning first.`
+  );
+  return priceMatches[0].eventTicketTypeId;
 }
 ```
 
 **Performance Note:**
 
-The current implementation runs `computeAvailability()` for each event, which is 2+ queries per event. With 56 events, this is ~112 queries. Acceptable short-term, but won't scale.
+The current implementation runs `computeAvailability()` for each event, which is 3+ queries per event (eventDate lookup, null check, groupBy, count). With 56 events, this is ~170 queries. Acceptable short-term, but won't scale.
 
-**Short-term mitigation (implement now):**
+**Short-term mitigation (optional, implement if needed):**
+
+Since this is pages router with serverless functions, `next/cache` may not work as expected. A simple in-memory TTL cache works everywhere:
+
 ```typescript
-// Add caching with 60-second TTL for public API
-import { unstable_cache } from 'next/cache';
+// Simple in-memory cache - survives within a single serverless invocation
+// Not shared across instances, but reduces repeated queries within one request
+const availabilityCache = new Map<number, { data: EventAvailability; expires: number }>();
+const CACHE_TTL_MS = 60_000; // 60 seconds
 
-const getCachedAvailability = unstable_cache(
-  async (eventDateId: number) => computeAvailability(eventDateId),
-  ['event-availability'],
-  { revalidate: 60 } // 60 seconds
-);
+async function getCachedAvailability(eventDateId: number): Promise<EventAvailability> {
+  const now = Date.now();
+  const cached = availabilityCache.get(eventDateId);
+  
+  if (cached && cached.expires > now) {
+    return cached.data;
+  }
+  
+  const data = await computeAvailability(eventDateId);
+  availabilityCache.set(eventDateId, { data, expires: now + CACHE_TTL_MS });
+  return data;
+}
 ```
+
+This is "nice-to-have" for the compatibility window. Given it's temporary, you can also skip caching entirely and accept the query load.
 
 **Long-term options (implement if events grow significantly):**
 1. Add `?include=availability` query param - only compute when requested
@@ -749,6 +844,28 @@ GROUP BY path;
 ```
 
 If you don't have telemetry, the 2-week compatibility window with `_deprecated` notices should surface any external dependencies. Monitor for support requests during that window.
+
+**Code Write Path Check:**
+
+Before dropping `categoryId` column, verify no code still writes to it:
+
+```bash
+# Search for categoryId writes in API and service layers
+grep -rn "categoryId" src/pages/api src/lib/services --include="*.ts" --include="*.tsx" | grep -v "// " | grep -v "WHERE" | grep -v "select"
+```
+
+Review each match. Any that set `categoryId` in a create/update must be removed before the migration.
+
+**Runtime sanity check (optional):** For one release before Phase 2, add a warning log in ticket creation:
+
+```typescript
+// In order creation API
+if (ticketData.categoryId) {
+  console.warn(`[DEPRECATION] categoryId provided in ticket creation - this field will be removed. Order: ${orderId}`);
+}
+```
+
+This catches any hidden code paths or external integrations still sending categoryId.
 
 ### 2.2 Database Changes
 
