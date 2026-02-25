@@ -60,8 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           order: {
             eventDateId: nextDate.id,
             status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
-          },
-          eventTicketTypeId: { not: null }
+          }
         },
         _count: {
           id: true
