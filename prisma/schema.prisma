@@ -33,7 +33,6 @@ model EventTicketType {
   price           Int
   currency        String      @default("GBP")
   capacity        Int?
-  sold            Int         @default(0)
   isActive        Boolean     @default(true)
   sortOrder       Int         @default(0)
   colorHex        String?
@@ -145,20 +144,20 @@ model OrderItem {
 }
 
 model Ticket {
-  id                String           @id @default(uuid())
+  id                String          @id @default(uuid())
   orderId           String
-  used              Boolean          @default(false)
+  used              Boolean         @default(false)
   secret            String?
-  amount            Int              @default(1)
+  amount            Int             @default(1)
   firstName         String?
   lastName          String?
-  currency          String           @default("GBP")
-  eventTicketTypeId Int?
-  feeCharged        Int              @default(0)
+  currency          String          @default("GBP")
+  eventTicketTypeId Int
+  feeCharged        Int             @default(0)
   priceCharged      Int?
-  taxCharged        Int              @default(0)
-  eventTicketType   EventTicketType? @relation(fields: [eventTicketTypeId], references: [id])
-  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  taxCharged        Int             @default(0)
+  eventTicketType   EventTicketType @relation(fields: [eventTicketTypeId], references: [id])
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([eventTicketTypeId])

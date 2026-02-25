@@ -115,18 +115,15 @@ export async function createOrderWithEventTicketTypes(
         // }
 
         // Use price override if provided, otherwise use ticket type price
-        const priceCharged = item.priceOverride ?? 0; // TODO: Use ticketType.price after migration
+        const priceCharged = item.priceOverride ?? 0;
 
         // Create multiple tickets for the quantity
         for (let i = 0; i < item.quantity; i++) {
           const ticket = await tx.ticket.create({
             data: {
               orderId: order.id,
-              // eventTicketTypeId: item.eventTicketTypeId, // TODO: Uncomment after migration
-              // priceCharged: priceCharged, // TODO: Uncomment after migration
-              // currency: ticketType.currency, // TODO: Uncomment after migration
-              // taxCharged: 0, // TODO: Uncomment after migration
-              // feeCharged: 0, // TODO: Uncomment after migration
+              eventTicketTypeId: item.eventTicketTypeId,
+              priceCharged: priceCharged,
               amount: 1,
               secret: Math.random().toString(36).substr(2, 20),
             }

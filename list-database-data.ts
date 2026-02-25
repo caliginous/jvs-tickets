@@ -49,7 +49,7 @@ async function listAllEventsAndOrders() {
 
         console.log(`   Ticket Types: ${event.ticketTypes.length}`)
         event.ticketTypes.forEach(tt => {
-          console.log(`     - ${tt.name}: £${(tt.price / 100).toFixed(2)} (${tt.capacity || 'unlimited'} capacity, ${tt.sold} sold)`)
+          console.log(`     - ${tt.name}: £${(tt.price / 100).toFixed(2)} (${tt.capacity || 'unlimited'} capacity)`)
         })
 
         console.log(`   Event Dates: ${event.dates.length}`)

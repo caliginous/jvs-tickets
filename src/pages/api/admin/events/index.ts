@@ -270,8 +270,7 @@ export default async function handler(
                                 colorHex: ticketType.colorHex || null,
                                 isActive: ticketType.isActive !== false, // Default to true
                                 isPublic: ticketType.isPublic !== false, // Default to true
-                                sortOrder: ticketType.sortOrder || i,
-                                sold: 0
+                                sortOrder: ticketType.sortOrder || i
                             }
                         });
                         

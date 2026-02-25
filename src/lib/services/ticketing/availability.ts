@@ -67,31 +67,11 @@ export async function computeAvailability(
     throw new Error(`EventDate ${eventDateId} not found`);
   }
 
-  // SAFETY CHECK: Detect any tickets with null eventTicketTypeId that would be miscounted.
-  // Currently 0 exist (verified), but this catches future regressions.
-  // TODO: Remove this check after Phase 3.2 when Ticket.eventTicketTypeId becomes NOT NULL
-  const nullTypeTickets = await prisma.ticket.count({
-    where: {
-      eventTicketTypeId: null,
-      order: {
-        eventDateId: eventDateId,
-        status: { in: [...CAPACITY_RESERVED_STATUSES] },
-      },
-    },
-  });
-
-  if (nullTypeTickets > 0) {
-    console.error(
-      `[computeAvailability] CRITICAL: ${nullTypeTickets} tickets with null eventTicketTypeId ` +
-        `for eventDateId=${eventDateId}. These are NOT being counted in availability!`
-    );
-  }
-
   // Get sold counts per ticket type in ONE query (not a loop)
+  // Note: eventTicketTypeId is now NOT NULL (Phase 3.2), so no null filtering needed
   const soldCounts = await prisma.ticket.groupBy({
     by: ['eventTicketTypeId'],
     where: {
-      eventTicketTypeId: { not: null },
       order: {
         eventDateId: eventDateId,
         status: { in: [...CAPACITY_RESERVED_STATUSES] },
@@ -100,12 +80,10 @@ export async function computeAvailability(
     _count: { id: true },
   });
 
-  // Build lookup map
+  // Build lookup map (eventTicketTypeId is now NOT NULL, no null check needed)
   const soldByType = new Map<number, number>();
   for (const row of soldCounts) {
-    if (row.eventTicketTypeId !== null) {
-      soldByType.set(row.eventTicketTypeId, row._count.id);
-    }
+    soldByType.set(row.eventTicketTypeId, row._count.id);
   }
 
   // ROBUST totalSold: Use separate count query constrained only by eventDateId + reserved statuses.

@@ -325,7 +325,6 @@ export async function getStaticProps({ locale }) {
                         name: true,
                         price: true,
                         capacity: true,
-                        sold: true,
                         colorHex: true
                     }
                 }
