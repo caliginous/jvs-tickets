@@ -13,8 +13,7 @@ export const OrderDetailsDialog = ({
     onClose,
     onMarkAsPayed,
     onMarkAsShipped,
-    onDelete,
-    categories
+    onDelete
 }) => {
     const [detailsTab, setDetailsTab] = useState("overview");
     const [deleteOpen, setDeleteOpen] = useState(false);
@@ -152,7 +151,6 @@ export const OrderDetailsDialog = ({
                             <OrderDeliveryInformationDetails
                                 order={order}
                                 onMarkAsShipped={onMarkAsShipped}
-                                categories={categories}
                             />
                         </div>
                     )}

@@ -44,7 +44,7 @@ import { BulkDeleteOrdersDialog } from "../../components/admin/dialogs/BulkDelet
 
 
 
-export default function Orders({ permissionDenied, count, categories, eventDates, events, paymentFees, currency, shippingFees}) {
+export default function Orders({ permissionDenied, count, eventDates, events, paymentFees, currency, shippingFees}) {
     const { data: session } = useSession();
     const [orders, setOrders] = useState([]);
     const [order, setOrder] = useState(null);
@@ -454,7 +454,6 @@ export default function Orders({ permissionDenied, count, categories, eventDates
                 onMarkAsPayed={() => loadOrders(filter.current || {})}
                 onMarkAsShipped={() => loadOrders(filter.current || {})}
                 onDelete={() => loadOrders(filter.current || {})}
-                categories={order?.eventDateId ? (categories[order.eventDateId] || []) : []}
             />
             <MarkOrdersAsPayedDialog
                 open={markAsPaidOpen}
@@ -462,10 +461,7 @@ export default function Orders({ permissionDenied, count, categories, eventDates
                     await refreshProps();
                     setMarkAsPaidOpen(false);
                 }}
-                categories={categories}
                 currency={currency}
-                shippingFees={shippingFees}
-                paymentFees={paymentFees}
             />
 
             <AddOrderWithTicketTypes
@@ -1032,45 +1028,41 @@ export async function getServerSideProps(context: NextPageContext) {
         context,
         async () => {
             const count = await prisma.order.count();
-            let eventDates = await prisma.eventDate.findMany({
+            
+            // Fetch only essential event date info for dropdowns
+            const eventDates = await prisma.eventDate.findMany({
                 select: {
                     id: true,
                     date: true,
                     event: {
                         select: {
                             id: true,
-                            title: true,
-                            ticketTypes: true
+                            title: true
                         }
                     }
-                }
+                },
+                orderBy: { date: 'desc' }
             });
 
+            // Fetch minimal event info for filters
             const events = await prisma.event.findMany({
-                include: {
-                    dates: true
-                }
+                select: {
+                    id: true,
+                    title: true,
+                    dates: {
+                        select: {
+                            id: true,
+                            date: true
+                        },
+                        orderBy: { date: 'desc' }
+                    }
+                },
+                orderBy: { title: 'asc' }
             });
-
-            const categories: Record<number, Array<{ id: number; price: number; label?: string; ticketsLeft?: number | null }>> = {};
-            for (const eventDate of eventDates) {
-                try {
-                    const availability = await computeAvailability(eventDate.id);
-                    categories[eventDate.id] = availability.ticketTypes.map(tt => ({
-                        id: tt.eventTicketTypeId,
-                        price: tt.price,
-                        label: tt.name,
-                        ticketsLeft: tt.available
-                    }));
-                } catch {
-                    categories[eventDate.id] = [];
-                }
-            }
 
             return {
-                    props: {
+                props: {
                     count,
-                    categories,
                     eventDates: JSON.parse(JSON.stringify(eventDates)),
                     events: JSON.parse(JSON.stringify(events)),
                     paymentFees: await getOption(Options.PaymentFeesPayment),

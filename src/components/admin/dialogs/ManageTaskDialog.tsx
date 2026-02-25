@@ -84,7 +84,6 @@ export const ManageTaskDialog = ({task, onClose, categories}) => {
                             <OrderDeliveryInformationDetails
                                 order={task.order}
                                 onMarkAsShipped={updateState}
-                                categories={categories}
                             />
                         </>
                     )}

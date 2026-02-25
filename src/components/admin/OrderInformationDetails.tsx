@@ -164,7 +164,7 @@ export const OrderPaymentInformationDetails = ({ order, onMarkAsPayed }: { order
     );
 };
 
-export const OrderDeliveryInformationDetails = ({ order, onMarkAsShipped, categories }: { order: any; onMarkAsShipped: () => void; categories: any[] }) => {
+export const OrderDeliveryInformationDetails = ({ order, onMarkAsShipped }: { order: any; onMarkAsShipped: () => void }) => {
     const handleMarkAsShipped = async () => {
         try {
             await axios.put("/api/admin/order/shipped", { orderId: order.id }, { withCredentials: true });
@@ -269,7 +269,7 @@ export const OrderDeliveryInformationDetails = ({ order, onMarkAsShipped, catego
             
             <div className="border-t border-gray-200 my-4" />
             
-            <TicketList order={order} categories={categories} />
+            <TicketList order={order} />
             
             {!hasShipped(order) && (
                 <Button onClick={handleMarkAsShipped} variant="solid">
@@ -308,7 +308,7 @@ export const OrderDeliveryInformationDetails = ({ order, onMarkAsShipped, catego
     );
 };
 
-const TicketList = ({ order, categories }: { order: any; categories: any[] }) => {
+const TicketList = ({ order }: { order: any }) => {
     const [tickets, setTickets] = useState(order.tickets);
 
     const download = async (ticketId: string, fileType: string) => {

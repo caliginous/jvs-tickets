@@ -5,9 +5,9 @@ import { showToast } from "../../../ui";
 import { validate as uuidValidate } from 'uuid';
 import { hasPayedIcon } from "../OrderInformationDetails";
 import { hasPayed } from "../../../constants/orderValidation";
-import { calculateTotalPrice, formatPrice } from "../../../constants/util";
+import { formatPrice } from "../../../constants/util";
 
-export const MarkOrdersAsPayedDialog = ({open, onClose, categories, currency, shippingFees, paymentFees}) => {
+export const MarkOrdersAsPayedDialog = ({open, onClose, currency}) => {
     const [orderId, setOrderId] = useState("");
     const [autoMarkAsPaid, setAutoMarkAsPaid] = useState(false);
     const [order, setOrder] = useState(null);
@@ -88,12 +88,9 @@ export const MarkOrdersAsPayedDialog = ({open, onClose, categories, currency, sh
                         <div className="space-y-4">
                             {order ? (
                                 <div className="space-y-3">
-                                    <OrderDisplay 
-                                        order={order} 
-                                        categories={order ? categories[order.eventDateId] : categories[0]} 
-                                        currency={currency} 
-                                        shippingFees={shippingFees} 
-                                        paymentFees={paymentFees} 
+                                    <OrderDisplay
+                                        order={order}
+                                        currency={currency}
                                     />
                                     {hasPayed(order) ? (
                                         <div className="flex items-center space-x-2 text-amber-600">
@@ -117,13 +114,14 @@ export const MarkOrdersAsPayedDialog = ({open, onClose, categories, currency, sh
     )
 };
 
-const OrderDisplay = ({order, categories, currency, shippingFees, paymentFees}) => {
-    const totalPrice = calculateTotalPrice(order.tickets, categories, shippingFees, paymentFees, JSON.parse(order.shipping).type, order.paymentType);
+const OrderDisplay = ({order, currency}) => {
+    // Use stored finalTotal instead of recalculating from categories
+    const totalPrice = order.finalTotal ?? order.originalTotal ?? 0;
 
     return (
         <div className="space-y-2 p-4 bg-gray-50 rounded-lg">
             <p className="text-sm"><span className="font-medium">OrderID:</span> {order.id}</p>
-            <p className="text-sm"><span className="font-medium">TicketAmount:</span> {order.tickets.length}</p>
+            <p className="text-sm"><span className="font-medium">TicketAmount:</span> {order.tickets?.length ?? 0}</p>
             <p className="text-sm"><span className="font-medium">Total Price:</span> {formatPrice(totalPrice, currency)}</p>
             <p className="text-sm"><span className="font-medium">Date:</span> {new Date(order.date).toLocaleString()}</p>
         </div>
