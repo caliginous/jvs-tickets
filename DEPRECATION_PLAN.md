@@ -54,9 +54,9 @@ PARTIALLY_REFUNDED     3
 
 // Statuses that reserve capacity (block availability)
 export const CAPACITY_RESERVED_STATUSES = [
-  'CONFIRMED',      // Payment confirmed via webhook
-  'PAID',           // Marked paid manually (legacy)
-  'PARTIALLY_REFUNDED', // Still has valid tickets
+  'CONFIRMED',      // Payment confirmed via Stripe webhook
+  'PAID',           // Marked paid manually by admin - see deprecation note below
+  'PARTIALLY_REFUNDED', // Money refunded, but tickets remain valid (see note below)
 ] as const;
 
 // Statuses that release capacity (inventory returns to pool)
@@ -98,13 +98,48 @@ export function releasesCapacity(status: string): boolean {
 2. No expiry cleanup exists - counting PENDING would cause phantom capacity locks
 3. If this changes, add PENDING to reserved statuses AND implement `cleanup-expired-orders` cron
 
+**Note on PAID vs CONFIRMED:**
+
+Data shows PAID is actively used (201 orders, latest today) - it's set by:
+- Stripe webhook (`webhook/stripe.ts`) on checkout.session.completed
+- Admin "Mark as Paid" flow (`/api/admin/order/paid.ts`, `/api/admin/order/bulk-mark-paid.ts`)
+- Admin order creation with `manual_paid` payment method
+
+CONFIRMED is set by:
+- Free event registration (`/api/free-event/register.ts`)
+- CSV imports (`/api/admin/import/execute.ts`)
+- Legacy orders from WooCommerce import
+
+Both are legitimate statuses. No deprecation needed, but code should prefer `CONFIRMED` for new automated flows.
+
+**Note on PARTIALLY_REFUNDED:**
+
+Current refund behavior (verified in `/api/admin/refund/index.ts`):
+- Refunds adjust the order's `finalTotal` field
+- Tickets remain as database rows - they are NOT deleted
+- Order status changes to `PARTIALLY_REFUNDED` or `REFUNDED`
+
+**Decision: PARTIALLY_REFUNDED does NOT release ticket capacity.**
+
+Rationale: Partial refunds in this codebase are "money adjustment only" (e.g., price negotiation, service recovery). The ticket holders still attend the event. If a future feature needs to release individual tickets on partial refund, it must either:
+1. Delete the refunded tickets, or
+2. Add per-ticket status (e.g., `Ticket.status = 'CANCELLED'`)
+
+For now, the model is consistent: all tickets on PARTIALLY_REFUNDED orders still count against capacity.
+
+**Note on REFUNDED:**
+
+Full refunds (REFUNDED status) DO release capacity, but the ticket rows remain in the database for audit purposes. The availability computation filters by order status, not ticket existence.
+
 ### 0.2 Centralized Availability Computation
 
 **Create new file:** `src/lib/services/ticketing/availability.ts`
 
 ```typescript
-import prisma from '../../prisma';
-import { CAPACITY_RESERVED_STATUSES } from '../../../constants/orderStatuses';
+// NOTE: This file lives at src/lib/services/ticketing/availability.ts
+// Import paths are relative to that location
+import prisma from '../../prisma'; // src/lib/prisma.ts
+import { CAPACITY_RESERVED_STATUSES } from '../../../constants/orderStatuses'; // src/constants/orderStatuses.ts
 
 export interface TicketTypeAvailability {
   eventTicketTypeId: number;
@@ -123,6 +158,7 @@ export interface EventAvailability {
   totalLimit: number | null;
   totalSold: number;
   totalAvailable: number | null;
+  globalRemaining: number | null; // Same as totalAvailable, explicit for clarity
   ticketTypes: TicketTypeAvailability[];
 }
 
@@ -152,6 +188,27 @@ export async function computeAvailability(eventDateId: number): Promise<EventAva
     throw new Error(`EventDate ${eventDateId} not found`);
   }
 
+  // SAFETY CHECK: Detect any tickets with null eventTicketTypeId that would be miscounted.
+  // Currently 0 exist (verified), but this catches future regressions.
+  const nullTypeTickets = await prisma.ticket.count({
+    where: {
+      eventTicketTypeId: null,
+      order: {
+        eventDateId: eventDateId,
+        status: { in: [...CAPACITY_RESERVED_STATUSES] }
+      }
+    }
+  });
+  
+  if (nullTypeTickets > 0) {
+    console.error(
+      `[computeAvailability] CRITICAL: ${nullTypeTickets} tickets with null eventTicketTypeId ` +
+      `for eventDateId=${eventDateId}. These are NOT being counted in availability!`
+    );
+    // In production, you might want to throw or alert here
+    // For now, log loudly so monitoring can catch it
+  }
+
   // Get sold counts per ticket type in ONE query (not a loop)
   const soldCounts = await prisma.ticket.groupBy({
     by: ['eventTicketTypeId'],
@@ -173,12 +230,21 @@ export async function computeAvailability(eventDateId: number): Promise<EventAva
     }
   }
 
-  // Calculate total sold across all types
-  const totalSold = Array.from(soldByType.values()).reduce((sum, count) => sum + count, 0);
+  // ROBUST totalSold: Use separate count query constrained only by eventDateId + reserved statuses.
+  // This stays correct even if weird rows with null eventTicketTypeId appear.
+  const totalSoldResult = await prisma.ticket.count({
+    where: {
+      order: {
+        eventDateId: eventDateId,
+        status: { in: [...CAPACITY_RESERVED_STATUSES] }
+      }
+    }
+  });
+  const totalSold = totalSoldResult;
 
   // Calculate per-type availability, clamped by global limit
   const globalLimit = eventDate.totalTicketLimit;
-  const globalRemaining = globalLimit !== null ? globalLimit - totalSold : null;
+  const globalRemaining = globalLimit !== null ? Math.max(0, globalLimit - totalSold) : null;
 
   const ticketTypes: TicketTypeAvailability[] = eventDate.event.ticketTypes.map(tt => {
     const sold = soldByType.get(tt.id) || 0;
@@ -208,7 +274,8 @@ export async function computeAvailability(eventDateId: number): Promise<EventAva
       sold,
       available,
       isSoldOut: available !== null && available <= 0,
-      isActive: tt.isActive
+      // Note: isActive will always be true here due to the where filter.
+      // We include it anyway for type completeness, but it's redundant in this context.
     };
   });
 
@@ -216,7 +283,8 @@ export async function computeAvailability(eventDateId: number): Promise<EventAva
     eventDateId,
     totalLimit: globalLimit,
     totalSold,
-    totalAvailable: globalRemaining !== null ? Math.max(0, globalRemaining) : null,
+    totalAvailable: globalRemaining,
+    globalRemaining, // Explicit field for UI clarity
     ticketTypes
   };
 }
@@ -307,32 +375,60 @@ grep -r "category\|Category" src/pages/admin --include="*.tsx" -l
 
 **File:** `src/pages/api/admin/category/index.ts`
 ```typescript
-// At top of POST handler
-if (req.method === 'POST') {
-  return res.status(410).json({ 
-    error: 'Category creation is deprecated. Use Event Ticket Types instead.',
-    migrationGuide: '/admin/events/ticket-types'
-  });
+// At top of handler, before any logic
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // GET is allowed (read-only viewing during transition)
+  if (req.method === 'GET') {
+    // ... existing GET logic ...
+  }
+  
+  // All mutation methods are deprecated
+  if (req.method === 'POST') {
+    return res.status(410).json({ 
+      error: 'Category creation is deprecated. Use Event Ticket Types instead.',
+      migrationGuide: '/admin/events/ticket-types'
+    });
+  }
+  
+  // Reject any other methods
+  res.setHeader('Allow', 'GET');
+  return res.status(405).json({ error: 'Method not allowed' });
 }
 ```
 
 **File:** `src/pages/api/admin/category/[id].ts`
 ```typescript
-// At top of PUT/DELETE handlers
-if (req.method === 'PUT' || req.method === 'DELETE') {
-  return res.status(410).json({ 
-    error: 'Category modification is deprecated. Use Event Ticket Types instead.',
-    migrationGuide: '/admin/events/ticket-types'
-  });
+// At top of handler, before any logic
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // GET is allowed (read-only viewing during transition)
+  if (req.method === 'GET') {
+    // ... existing GET logic ...
+  }
+  
+  // All mutation methods are deprecated
+  if (req.method === 'PUT' || req.method === 'PATCH' || req.method === 'DELETE') {
+    return res.status(410).json({ 
+      error: 'Category modification is deprecated. Use Event Ticket Types instead.',
+      migrationGuide: '/admin/events/ticket-types'
+    });
+  }
+  
+  // Reject any other methods
+  res.setHeader('Allow', 'GET');
+  return res.status(405).json({ error: 'Method not allowed' });
 }
 ```
+
+**HTTP status code rationale:**
+- `410 Gone` - Resource (mutation capability) existed but is now permanently unavailable
+- `405 Method Not Allowed` - For truly unsupported methods (HEAD, OPTIONS, etc.)
 
 ### 0.5 API Compatibility Window
 
 **File:** `src/pages/api/public/events.ts`
 
 ```typescript
-import { computeAvailability } from '../../lib/services/ticketing/availability';
+import { computeAvailability, EventAvailability } from '../../lib/services/ticketing/availability';
 
 // In the response mapping:
 const eventsWithAvailability = await Promise.all(
@@ -348,18 +444,32 @@ const eventsWithAvailability = await Promise.all(
       title: event.title,
       // ... other fields ...
       
+      // Global availability - use this for "X remaining overall" display
+      availability: availability ? {
+        globalRemaining: availability.globalRemaining,
+        totalSold: availability.totalSold,
+        totalLimit: availability.totalLimit
+      } : null,
+      
       // NEW: ticketTypes with computed availability
-      ticketTypes: availability?.ticketTypes
-        .filter(tt => tt.isActive)
-        .map(tt => ({
-          id: tt.eventTicketTypeId,
-          name: tt.name,
-          price: tt.price,
-          currency: tt.currency,
-          capacity: tt.capacity,
-          available: tt.available,
-          isAvailable: !tt.isSoldOut
-        })) ?? [],
+      // NOTE: Each type's `available` is clamped by globalRemaining.
+      // If globalRemaining=5 and two types have unlimited capacity,
+      // both will show available=5. This is mathematically correct
+      // (user can pick 5 of either), but UI should show globalRemaining
+      // separately to avoid confusion.
+      ticketTypes: availability?.ticketTypes.map(tt => ({
+        id: tt.eventTicketTypeId,
+        name: tt.name,
+        price: tt.price,
+        currency: tt.currency,
+        capacity: tt.capacity,
+        sold: tt.sold,
+        available: tt.available, // Clamped by both type capacity AND global limit
+        availableByTypeOnly: tt.capacity !== null 
+          ? Math.max(0, tt.capacity - tt.sold) 
+          : null, // Raw type-level availability, before global clamp
+        isAvailable: !tt.isSoldOut
+      })) ?? [],
       
       // DEPRECATED: categories (remove after 2 weeks)
       categories: event.categories.map(c => ({
@@ -387,6 +497,27 @@ function findMatchingTicketType(categoryId: number, availability: EventAvailabil
   return null; // Implement if needed
 }
 ```
+
+**Performance Note:**
+
+The current implementation runs `computeAvailability()` for each event, which is 2+ queries per event. With 56 events, this is ~112 queries. Acceptable short-term, but won't scale.
+
+**Short-term mitigation (implement now):**
+```typescript
+// Add caching with 60-second TTL for public API
+import { unstable_cache } from 'next/cache';
+
+const getCachedAvailability = unstable_cache(
+  async (eventDateId: number) => computeAvailability(eventDateId),
+  ['event-availability'],
+  { revalidate: 60 } // 60 seconds
+);
+```
+
+**Long-term options (implement if events grow significantly):**
+1. Add `?include=availability` query param - only compute when requested
+2. Bulk availability query - single grouped query across all eventDateIds
+3. Accept eventual consistency - availability doesn't need millisecond accuracy
 
 ---
 
@@ -517,9 +648,9 @@ export const validateOrder = async (
 ): Promise<ValidationResult> => {
   
   // 1. Check event date exists
+  // Note: eventDate.eventId is available directly - no need to include event relation
   const eventDate = await prisma.eventDate.findUnique({
-    where: { id: eventDateId },
-    include: { event: true }
+    where: { id: eventDateId }
   });
   
   if (!eventDate) {
@@ -532,6 +663,7 @@ export const validateOrder = async (
   }
   
   // 2. Check event is bookable (sale window)
+  // eventDateIsBookable only needs the eventDate fields (ticketSaleStartDate, ticketSaleEndDate, date)
   if (checkEventBookable && !eventDateIsBookable(eventDate)) {
     return { 
       success: false, 
@@ -541,11 +673,12 @@ export const validateOrder = async (
   }
   
   // 3. Validate ticket types exist and are active
+  // Use eventDate.eventId directly - no extra query needed
   const requestedTypeIds = [...new Set(items.map(t => t.eventTicketTypeId))];
   const validTypes = await prisma.eventTicketType.findMany({
     where: { 
       id: { in: requestedTypeIds },
-      eventId: eventDate.event.id,
+      eventId: eventDate.eventId, // Direct field access, no join
       isActive: true
     }
   });
@@ -601,6 +734,21 @@ FROM "DiscountCode"
 WHERE array_length("appliesToCategories", 1) > 0;
 -- Must return 0
 ```
+
+**API Usage Check (if telemetry available):**
+
+If you have request logging (Vercel Analytics, custom logs, etc.), check for any requests to category endpoints in the past 2 weeks:
+
+```sql
+-- Example query if you have a request_logs table
+SELECT path, COUNT(*) as hits
+FROM request_logs
+WHERE path LIKE '%/api/%category%'
+  AND timestamp > NOW() - INTERVAL '14 days'
+GROUP BY path;
+```
+
+If you don't have telemetry, the 2-week compatibility window with `_deprecated` notices should surface any external dependencies. Monitor for support requests during that window.
 
 ### 2.2 Database Changes
 
@@ -758,7 +906,8 @@ Remove/update:
 ### Post-Phase 2 (Categories Removed)
 - [ ] Buy tickets for EventTicketType A and B
 - [ ] Verify availability decrements correctly
-- [ ] Refund an order, verify capacity returns to pool only if intended
+- [ ] Full refund: verify capacity is released (order becomes REFUNDED, tickets no longer counted)
+- [ ] Partial refund: verify capacity is NOT released (tickets still count, only money adjusted)
 - [ ] All discount modes work:
   - [ ] Per-event discount
   - [ ] Global percentage discount
@@ -775,8 +924,25 @@ Remove/update:
 
 ### Additional Critical Tests
 - [ ] **Stale pending test:** Create order, leave PENDING, confirm it doesn't block capacity forever
-- [ ] **Refund + return-to-pool:** Refund should not accidentally reopen sales without admin action (if business process requires)
+- [ ] **Null ticket type detection:** Create a ticket with null eventTicketTypeId (manually in DB), verify error is logged by `computeAvailability()`
 - [ ] **API compatibility snapshot:** During window, both `categories` and `ticketTypes` exist; after, only `ticketTypes`
+- [ ] **Global vs per-type display:** Verify UI shows `globalRemaining` separately when multiple unlimited ticket types share a global limit
+
+### Refund Behavior (Documented, Not Changing)
+
+**Current behavior is intentional and will NOT change in this deprecation:**
+
+| Refund Type | Order Status | Capacity Released? | Reason |
+|-------------|--------------|-------------------|--------|
+| Full refund | `REFUNDED` | Yes | Tickets no longer valid |
+| Partial refund | `PARTIALLY_REFUNDED` | No | Money adjustment only, tickets remain valid |
+
+The "return-to-pool gating" feature (admin must explicitly release refunded tickets) is **not implemented** and is **out of scope** for this deprecation. It should be handled separately as part of waitlist/inventory management features.
+
+If future business requirements need partial refunds to release some tickets:
+1. Add `Ticket.status` field (e.g., 'ACTIVE', 'CANCELLED')
+2. Update refund flow to mark specific tickets as CANCELLED
+3. Update `computeAvailability()` to filter by ticket status
 
 ---
 
