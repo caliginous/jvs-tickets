@@ -149,6 +149,11 @@ Full refunds (REFUNDED status) DO release capacity, but the ticket rows remain i
 
 ### 0.2 Centralized Availability Computation
 
+**Availability Rules (plain English):**
+- Capacity is counted per **Ticket row**, filtered by `Order.status` in `CAPACITY_RESERVED_STATUSES`.
+- Tickets are **never deleted** for refunds; refunds affect counting via Order status only.
+- Do NOT use `EventTicketType.sold` - it's unreliable. Always compute from Tickets.
+
 **Create new file:** `src/lib/services/ticketing/availability.ts`
 
 ```typescript
@@ -404,7 +409,8 @@ grep -r "category\|Category" src/pages/admin --include="*.tsx" -l
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // GET is allowed (read-only viewing during transition)
   if (req.method === 'GET') {
-    // ... existing GET logic ...
+    // ... existing GET logic - MUST return here ...
+    return res.status(200).json({ /* existing response */ });
   }
   
   // All mutation methods are deprecated
@@ -427,7 +433,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // GET is allowed (read-only viewing during transition)
   if (req.method === 'GET') {
-    // ... existing GET logic ...
+    // ... existing GET logic - MUST return here ...
+    return res.status(200).json({ /* existing response */ });
   }
   
   // All mutation methods are deprecated
@@ -565,31 +572,42 @@ function findMatchingTicketType(
   }
 
   if (priceMatches.length === 0) {
+    // Multiple name matches but no price match - ambiguous, don't guess
     console.warn(
-      `[findMatchingTicketType] Multiple ticket types match name "${category.label}" but none match price £${category.price}. Returning first match.`
+      `[findMatchingTicketType] Ambiguous: ${nameMatches.length} ticket types match name "${category.label}" ` +
+      `but none match price £${category.price}. Returning null to avoid incorrect mapping.`
     );
-    return nameMatches[0].eventTicketTypeId;
+    return null;
   }
 
-  // Multiple price matches too - ambiguous, return first and log
+  // Multiple price matches too - ambiguous, don't guess
   console.warn(
-    `[findMatchingTicketType] Ambiguous: ${priceMatches.length} ticket types match name "${category.label}" and price £${category.price}. Returning first.`
+    `[findMatchingTicketType] Ambiguous: ${priceMatches.length} ticket types match both name "${category.label}" ` +
+    `and price £${category.price}. Returning null to avoid incorrect mapping.`
   );
-  return priceMatches[0].eventTicketTypeId;
+  return null;
 }
 ```
 
 **Performance Note:**
 
-The current implementation runs `computeAvailability()` for each event, which is 3+ queries per event (eventDate lookup, null check, groupBy, count). With 56 events, this is ~170 queries. Acceptable short-term, but won't scale.
+The current implementation runs `computeAvailability()` for each event, which is **4 queries per event**:
+1. `findUnique` - eventDate with ticket types
+2. `count` - null eventTicketTypeId safety check
+3. `groupBy` - sold counts per ticket type
+4. `count` - robust totalSold
 
-**Short-term mitigation (optional, implement if needed):**
+With 56 events, this is ~224 queries. Acceptable short-term, but won't scale.
 
-Since this is pages router with serverless functions, `next/cache` may not work as expected. A simple in-memory TTL cache works everywhere:
+**Post-Phase 3 cleanup:** After `Ticket.eventTicketTypeId` becomes NOT NULL, remove the null safety check query (#2 above) - it can't happen anymore.
+
+**Short-term mitigation (optional):**
+
+In-memory caching may help if the serverless runtime reuses instances across requests. It won't help within a single request (each eventDateId is unique). Skip this unless you see actual performance issues.
 
 ```typescript
-// Simple in-memory cache - survives within a single serverless invocation
-// Not shared across instances, but reduces repeated queries within one request
+// May reduce queries if serverless instance is reused across requests.
+// Not guaranteed - some platforms spawn fresh instances per request.
 const availabilityCache = new Map<number, { data: EventAvailability; expires: number }>();
 const CACHE_TTL_MS = 60_000; // 60 seconds
 
@@ -637,13 +655,21 @@ grep -r "include.*seatMap" src/ --include="*.ts" --include="*.tsx"
 
 ### 1.2 Database Changes
 
-**Migration file:** `prisma/migrations/YYYYMMDD_remove_seatmaps/migration.sql`
+**Recommended approach:** Let Prisma generate the migration SQL:
+1. Edit `prisma/schema.prisma` (remove models/fields listed below)
+2. Run `npx prisma migrate dev --name remove_seatmaps`
+3. Review the generated SQL in `prisma/migrations/`
+
+This ensures constraint names match your environment. Hand-written SQL (shown below for reference) may fail if FK constraint names differ between dev and prod.
+
+**Hand-written migration (for reference):** `prisma/migrations/YYYYMMDD_remove_seatmaps/migration.sql`
 
 ```sql
 -- Drop SeatReservation table first (has FK to EventDate)
 DROP TABLE IF EXISTS "SeatReservation";
 
 -- Drop SeatMap foreign keys
+-- NOTE: Constraint names may differ. Use Prisma-generated migration to be safe.
 ALTER TABLE "Event" DROP CONSTRAINT IF EXISTS "Event_seatMapId_fkey";
 ALTER TABLE "Order" DROP CONSTRAINT IF EXISTS "Order_seatMapId_fkey";
 
@@ -850,11 +876,16 @@ If you don't have telemetry, the 2-week compatibility window with `_deprecated` 
 Before dropping `categoryId` column, verify no code still writes to it:
 
 ```bash
-# Search for categoryId writes in API and service layers
-grep -rn "categoryId" src/pages/api src/lib/services --include="*.ts" --include="*.tsx" | grep -v "// " | grep -v "WHERE" | grep -v "select"
+# Starting point - search for categoryId in API and service layers
+grep -rn "categoryId" src/pages/api src/lib/services --include="*.ts" --include="*.tsx"
 ```
 
-Review each match. Any that set `categoryId` in a create/update must be removed before the migration.
+This is heuristic. Manually inspect each match for:
+- `categoryId:` in Prisma `create`/`update` data blocks
+- `.categoryId =` assignments
+- `data: { ... categoryId` patterns
+
+Any write paths must be removed before the migration.
 
 **Runtime sanity check (optional):** For one release before Phase 2, add a warning log in ticket creation:
 
@@ -937,16 +968,15 @@ return {
   id: event.id,
   title: event.title,
   // ... other fields ...
-  ticketTypes: availability?.ticketTypes
-    .filter(tt => tt.isActive)
-    .map(tt => ({
-      id: tt.eventTicketTypeId,
-      name: tt.name,
-      price: tt.price,
-      currency: tt.currency,
-      capacity: tt.capacity,
-      available: tt.available,
-      isAvailable: !tt.isSoldOut
+  // Note: No .filter(tt => tt.isActive) needed - computeAvailability only returns active types
+  ticketTypes: availability?.ticketTypes.map(tt => ({
+    id: tt.eventTicketTypeId,
+    name: tt.name,
+    price: tt.price,
+    currency: tt.currency,
+    capacity: tt.capacity,
+    available: tt.available,
+    isAvailable: !tt.isSoldOut
     })) ?? [],
   _apiVersion: 2
   // NO categories field
@@ -1104,6 +1134,8 @@ src/lib/services/ticketing/availability.ts
 ```
 
 ### Files to Delete (17 files)
+
+**Phase 1 (SeatMaps):**
 ```
 src/pages/seatselection/[eventDateId].tsx
 src/pages/admin/events/seatmaps.tsx
@@ -1114,10 +1146,14 @@ src/pages/api/admin/seatmap/preview/[id].ts
 src/pages/api/seatmap_preview/[id].ts
 src/components/seatselection/* (entire directory)
 src/components/admin/SeatMapEditor/* (entire directory)
+```
+
+**Phase 2 (Categories):**
+```
 src/components/admin/CategorySelection.tsx
 src/components/admin/CategoryMigrationPanel.tsx
-src/pages/api/admin/category/[id].ts
-src/pages/api/admin/category/index.ts
+src/pages/api/admin/category/[id].ts      # Frozen in Phase 0.4, deleted here
+src/pages/api/admin/category/index.ts     # Frozen in Phase 0.4, deleted here
 src/pages/api/admin/events/migrate-categories-to-ticket-types.ts
 src/pages/admin/events/migrate-categories.tsx
 src/lib/validators/orderValidator.ts
@@ -1133,8 +1169,8 @@ src/pages/api/events.ts
 src/pages/api/public/events.ts
 src/pages/api/admin/events/[id].ts
 src/pages/api/admin/events/index.ts
-src/pages/api/admin/category/index.ts (freeze mutations)
-src/pages/api/admin/category/[id].ts (freeze mutations)
+src/pages/api/admin/category/index.ts     # Phase 0.4: freeze mutations; Phase 2.3: delete
+src/pages/api/admin/category/[id].ts      # Phase 0.4: freeze mutations; Phase 2.3: delete
 src/pages/api/discount/validate.ts
 src/components/admin/dialogs/ManageEventDialog.tsx
 src/components/admin/dialogs/ManageEventDialog.schema.ts
