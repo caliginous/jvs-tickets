@@ -34,11 +34,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Customer data incomplete' });
     }
 
-    // Validate ticket structure
+    // Validate ticket structure and normalize field names
+    // Accept both ticketTypeId and categoryId for backwards compatibility
     for (const ticket of tickets) {
+      // Normalize: if categoryId is provided but not ticketTypeId, use categoryId
+      if (!ticket.ticketTypeId && ticket.categoryId) {
+        ticket.ticketTypeId = ticket.categoryId;
+      }
+      
       if (!ticket.ticketTypeId || !ticket.amount || ticket.price === undefined || ticket.price === null || !ticket.name) {
         console.error('❌ Validation failed: Invalid ticket structure', ticket);
-        return res.status(400).json({ error: 'Invalid ticket structure - ticketTypeId required' });
+        return res.status(400).json({ error: 'Invalid ticket structure - ticketTypeId or categoryId required' });
       }
     }
 
