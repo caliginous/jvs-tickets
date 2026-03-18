@@ -11,7 +11,8 @@ import {
     QrcodeIcon,
     TagIcon,
     ChartBarIcon,
-    MailIcon
+    MailIcon,
+    LightningBoltIcon
 } from "@heroicons/react/solid";
 import NavSection from "./NavSection";
 
@@ -32,6 +33,11 @@ export const sidebarConfig = [
         title: "Orders",
         path: "/admin/orders",
         icon: <BookOpenIcon />
+    },
+    {
+        title: "Door Sales",
+        path: "/admin/door-sales",
+        icon: <LightningBoltIcon />
     },
     {
         title: "Reports",
