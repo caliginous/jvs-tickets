@@ -1020,13 +1020,14 @@ export default function Orders({ permissionDenied, count, eventDates, events, pa
             </div>
 
             {/* Mobile FAB — link to door sales */}
-            <a
-              href="/admin/door-sales"
-              className="lg:hidden fixed bottom-6 right-6 z-30 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center"
-              title="Door Sales"
-            >
-              <LightningBoltIcon className="w-6 h-6" />
-            </a>
+            <Link href="/admin/door-sales">
+              <a
+                className="lg:hidden fixed bottom-6 right-6 z-30 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center"
+                title="Door Sales"
+              >
+                <LightningBoltIcon className="w-6 h-6" />
+              </a>
+            </Link>
             </>
         </AdminLayout>
     );
