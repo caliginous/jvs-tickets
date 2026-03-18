@@ -32,9 +32,10 @@ interface TicketType {
 interface DoorSalesProps {
   events: Event[];
   permissionDenied?: boolean;
+  authStep?: string;
 }
 
-export default function DoorSales({ events, permissionDenied }: DoorSalesProps) {
+export default function DoorSales({ events, permissionDenied, authStep }: DoorSalesProps) {
   const { status } = useSession();
   
   // Form state
@@ -206,7 +207,7 @@ export default function DoorSales({ events, permissionDenied }: DoorSalesProps) 
   // Loading state
   if (status === 'loading') {
     return (
-      <AdminLayout permissionDenied={permissionDenied}>
+      <AdminLayout permissionDenied={permissionDenied} authStep={authStep}>
         <div className="flex justify-center items-center min-h-[400px]">
           <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
           <div className="ml-3 text-gray-600">Loading...</div>
@@ -216,7 +217,7 @@ export default function DoorSales({ events, permissionDenied }: DoorSalesProps) 
   }
 
   return (
-    <AdminLayout permissionDenied={permissionDenied}>
+    <AdminLayout permissionDenied={permissionDenied} authStep={authStep}>
       <div className="max-w-lg mx-auto px-4 pb-32">
         <div className="flex items-center gap-3 py-4">
           <LightningBoltIcon className="w-8 h-8 text-yellow-500" />

@@ -119,23 +119,14 @@ export const getAdminServerSideProps = async (
         }
         console.log('[ADMIN] Request headers cookie:', context.req.headers.cookie ? 'Present' : 'Missing');
 
-        if (!token) {
-            console.log('[ADMIN] No token found, setting permissionDenied: true');
+        // If no token or no email, redirect to login page
+        if (!token || !token.email) {
+            console.log('[ADMIN] No token or email found, redirecting to login');
             return {
-                props: {
-                    permissionDenied: true,
-                    authStep: 'no_token'
-                }
-            };
-        }
-
-        if (!token.email) {
-            console.log('[ADMIN] Token found but no email:', token);
-            return {
-                props: {
-                    permissionDenied: true,
-                    authStep: 'no_email'
-                }
+                redirect: {
+                    destination: '/admin/login',
+                    permanent: false,
+                },
             };
         }
 
@@ -164,13 +155,12 @@ export const getAdminServerSideProps = async (
         return result;
     } catch (error) {
         console.error('[ADMIN] Error in getAdminServerSideProps:', error);
-        // Instead of redirecting, set permissionDenied and return props
+        // On error, redirect to login to be safe
         return {
-            props: {
-                permissionDenied: true,
-                error: error.message,
-                authStep: 'error'
-            }
+            redirect: {
+                destination: '/admin/login',
+                permanent: false,
+            },
         };
     }
 };

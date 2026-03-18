@@ -20,35 +20,6 @@ export const AdminLayout = ({
     const [pageName, setPageName] = useState<string>("");
     const router = useRouter();
 
-
-    // Handle authentication redirect
-    useEffect(() => {
-        if (permissionDenied === true && (authStep === 'no_token' || authStep === 'no_email')) {
-            router.replace('/admin/login');
-            return;
-        }
-    }, [permissionDenied, authStep, router]);
-
-    // Three-state permission logic: null = loading, true = denied, false = allowed
-    const finalPermissionDenied = (() => {
-        // If permissionDenied is explicitly false, allow access
-        if (permissionDenied === false) return false;
-        // If permissionDenied is explicitly true, check if we should redirect
-        if (permissionDenied === true) {
-            // If it's a no_token or no_email case, we'll redirect, so show loading
-            if (authStep === 'no_token' || authStep === 'no_email') {
-                return null; // Show loading while redirecting
-            }
-            return true; // Show access denied for other cases
-        }
-        // If permissionDenied is undefined or null, this could mean:
-        // 1. User is not authenticated (should show login)
-        // 2. Props failed to serialize (should allow access if user is actually authenticated)
-        // For now, we'll allow access to prevent the loading loop
-        return false; // Allow access instead of denying
-    })();
-
-
     useEffect(() => {
         const urls = sidebarConfig
             .map((sidebar) => [
@@ -62,23 +33,8 @@ export const AdminLayout = ({
         setPageName(title);
     }, [router.pathname]);
 
-    // Loading state
-    if (finalPermissionDenied === null) {
-        return (
-            <div className="flex min-h-full overflow-hidden max-h-full">
-                <Head>
-                    <title>Loading - Ticketshop Admin</title>
-                    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-                </Head>
-                <div className="flex items-center justify-center min-h-screen w-full">
-                    <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
-                </div>
-            </div>
-        );
-    }
-
-    // Permission denied state
-    if (finalPermissionDenied === true) {
+    // Permission denied state (only for users who are authenticated but lack specific permissions)
+    if (permissionDenied === true) {
         return (
             <div className="flex min-h-full overflow-hidden max-h-full">
                 <Head>
