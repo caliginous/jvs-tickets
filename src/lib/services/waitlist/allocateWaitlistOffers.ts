@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import prisma from '../../prisma';
 import { computeAvailability } from '../ticketing/availability';
 
-const OFFER_DURATION_MINUTES = 30;
+const OFFER_DURATION_MINUTES = 120;
 
 // Stable advisory lock key derived from eventDateId.
 // pg_advisory_lock takes a bigint; we use the eventDateId directly

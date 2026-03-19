@@ -475,7 +475,7 @@ export class EmailTriggerService {
           quantity: data.quantity,
           expiresAt: data.expiresAt,
           claimLink: data.claimLink,
-          expiryMinutes: 30
+          expiryMinutes: 120
         },
         ...(await getEmailCommonData())
       };

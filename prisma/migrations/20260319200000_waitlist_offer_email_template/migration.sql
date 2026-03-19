@@ -19,7 +19,7 @@ INSERT INTO "EmailTemplate" (
     'waitlist_offer',
 
     -- subjects (JSON, keyed by locale)
-    '{"en": "Tickets now available – complete your booking within 30 minutes"}',
+    '{"en": "Tickets now available – complete your booking within 2 hours"}',
 
     -- baseHtml (outer wrapper)
     '<!DOCTYPE html>

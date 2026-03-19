@@ -74,7 +74,7 @@ function WaitlistJoinForm({ eventDateId, ticketTypes }: { eventDateId: number; t
     <div className="bg-white border-2 border-blue-200 rounded-xl p-6 mt-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-1">Join the Waitlist</h3>
       <p className="text-sm text-gray-600 mb-4">
-        We&apos;ll email you if tickets become available. You&apos;ll have 30 minutes to complete your booking.
+        We&apos;ll email you if tickets become available. You&apos;ll have 2 hours to complete your booking.
       </p>
 
       {result?.error && (
