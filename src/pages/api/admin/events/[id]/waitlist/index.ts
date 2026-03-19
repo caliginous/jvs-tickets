@@ -13,13 +13,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!session) return;
 
     try {
-        const { eventId } = req.query;
+        const { id } = req.query;
 
-        if (!eventId || typeof eventId !== "string") {
+        if (!id || typeof id !== "string") {
             return res.status(400).json({ error: "Valid event ID is required" });
         }
 
-        const eventIdNum = parseInt(eventId, 10);
+        const eventIdNum = parseInt(id, 10);
 
         const eventDates = await prisma.eventDate.findMany({
             where: { eventId: eventIdNum },
