@@ -109,7 +109,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
         }
 
-        // Update order status
+        // Update order status (gated inventory: capacity stays held until admin returns to pool)
         await prisma.order.update({
             where: { id },
             data: {
@@ -117,6 +117,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 cancelledAt: new Date(),
                 cancelledBy: "admin",
                 cancellationReason: reason,
+                inventoryReturnedToPool: false,
+                inventoryReturnedAt: null,
+                inventoryReturnedBy: null,
                 paymentResult: JSON.stringify({
                     ...JSON.parse(order.paymentResult || '{}'),
                     cancellation: {

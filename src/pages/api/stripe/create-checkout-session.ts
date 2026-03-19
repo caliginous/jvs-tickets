@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { createCheckoutSession } from '../../../lib/stripe';
 import prisma from '../../../lib/prisma';
 import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
+import { validateClaimSession, createOrderWithWaitlistFulfilment } from '../../../lib/services/waitlist/claimSessionValidator';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -70,24 +71,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log(`✅ Ticket sale end date check passed: sales end at ${saleEndDate.toISOString()}`);
     }
 
-    // CAPACITY CHECK: Use canonical availability service
-    console.log('🔒 Checking ticket capacity via availability service...');
-    
-    const capacityItems = tickets.map(t => ({
-      eventTicketTypeId: t.ticketTypeId,
-      quantity: t.amount
-    }));
-    
-    const capacityCheck = await checkCapacityForOrder(eventDateId, capacityItems);
-    
-    if (!capacityCheck.success) {
-      const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
-      const errorDetails = 'details' in capacityCheck ? capacityCheck.details : undefined;
-      console.error(`❌ Capacity check failed: ${errorMessage}`);
-      return res.status(409).json({ 
-        error: errorMessage,
-        details: errorDetails
+    // WAITLIST CLAIM SESSION: check for controlled capacity bypass
+    const { claimSessionToken } = req.body;
+    let claimSessionValidation: Awaited<ReturnType<typeof validateClaimSession>> | null = null;
+
+    if (claimSessionToken) {
+      console.log('🎫 Validating waitlist claim session...');
+      claimSessionValidation = await validateClaimSession({
+        claimSessionToken,
+        eventDateId,
+        tickets: tickets.map(t => ({
+          eventTicketTypeId: t.ticketTypeId,
+          quantity: t.amount,
+        })),
       });
+
+      if (!claimSessionValidation.valid) {
+        const validationError = 'error' in claimSessionValidation ? claimSessionValidation.error : 'Validation failed';
+        console.error(`❌ Claim session validation failed: ${validationError}`);
+        return res.status(400).json({ error: validationError });
+      }
+
+      console.log('✅ Waitlist claim session validated - bypassing standard capacity check');
+    }
+
+    // CAPACITY CHECK: Use canonical availability service (skipped for valid claim sessions)
+    if (!claimSessionValidation?.valid) {
+      console.log('🔒 Checking ticket capacity via availability service...');
+      
+      const capacityItems = tickets.map(t => ({
+        eventTicketTypeId: t.ticketTypeId,
+        quantity: t.amount
+      }));
+      
+      const capacityCheck = await checkCapacityForOrder(eventDateId, capacityItems);
+      
+      if (!capacityCheck.success) {
+        const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
+        const errorDetails = 'details' in capacityCheck ? capacityCheck.details : undefined;
+        console.error(`❌ Capacity check failed: ${errorMessage}`);
+        return res.status(409).json({ 
+          error: errorMessage,
+          details: errorDetails
+        });
+      }
     }
     
     console.log('✅ All capacity checks passed');
@@ -147,8 +174,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
     
-    // Create PENDING order with tickets to reserve capacity
-    // Ensure values are stored as integers in pence (database uses DOUBLE PRECISION but we store as pence integers)
     const originalTotalInPence = Math.round(originalTotal || 0);
     const finalTotalInPence = Math.round(totalAmount);
     const discountInPence = originalTotal && totalAmount ? Math.round(originalTotal - totalAmount) : 0;
@@ -158,39 +183,84 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       finalTotal: finalTotalInPence,
       discountAmount: discountInPence
     });
-    
-    const order = await prisma.order.create({
-      data: {
-        id: orderId,
-        userId: user.id,
-        eventDateId: eventDateId,
-        paymentType: 'stripe',
-        status: 'PENDING',
-        shipping: 'digital',
-        locale: 'en',
-        idempotencyKey: orderId,
-        cancellationSecret: Math.random().toString(36).substr(2, 15),
-        originalTotal: originalTotalInPence, // Store in pence as integer
-        finalTotal: finalTotalInPence, // Store in pence as integer
-        discountAmount: discountInPence, // Store in pence as integer
-        customFields: customerData?.customFields ? JSON.stringify(customerData.customFields) : null
-      }
-    });
-    
-    console.log('✅ Order created with finalTotal:', order.finalTotal, 'originalTotal:', order.originalTotal);
-    
-    // Create tickets to reserve them
+
+    // Build ticket rows for creation
+    const ticketRows: Array<{
+      eventTicketTypeId: number;
+      amount: number;
+      priceCharged: number;
+      secret: string;
+      firstName: string;
+      lastName: string;
+    }> = [];
     for (const ticket of tickets) {
       for (let i = 0; i < ticket.amount; i++) {
+        ticketRows.push({
+          eventTicketTypeId: ticket.ticketTypeId,
+          amount: 1,
+          priceCharged: ticket.price,
+          secret: Math.random().toString(36).substr(2, 15),
+          firstName: customerData?.firstName || '',
+          lastName: customerData?.lastName || '',
+        });
+      }
+    }
+
+    const orderData = {
+      paymentType: 'stripe',
+      shipping: 'digital',
+      locale: 'en',
+      idempotencyKey: orderId,
+      cancellationSecret: Math.random().toString(36).substr(2, 15),
+      originalTotal: originalTotalInPence,
+      finalTotal: finalTotalInPence,
+      discountAmount: discountInPence,
+      customFields: customerData?.customFields ? JSON.stringify(customerData.customFields) : null,
+    };
+
+    if (claimSessionValidation?.valid) {
+      // WAITLIST PATH: order + tickets + offer fulfilment in ONE transaction
+      try {
+        const result = await createOrderWithWaitlistFulfilment({
+          orderId,
+          userId: user.id,
+          eventDateId,
+          orderData,
+          ticketRows,
+          orderItems: tickets.map((t: any) => ({
+            eventTicketTypeId: t.ticketTypeId,
+            quantity: t.amount,
+            unitPrice: t.price,
+          })),
+          claimSessionId: claimSessionValidation.claimSession.id,
+          offerId: claimSessionValidation.offer.id,
+          waitlistEntryId: claimSessionValidation.offer.waitlistEntryId,
+        });
+        console.log(`✅ Created PENDING order ${orderId} and fulfilled waitlist offer ${claimSessionValidation.offer.id} in single transaction`);
+      } catch (txError) {
+        console.error('❌ Waitlist claim transaction failed:', txError);
+        orderId = null; // nothing to roll back - the transaction was atomic
+        return res.status(500).json({ error: 'Failed to create order from waitlist claim' });
+      }
+    } else {
+      // NORMAL PATH: standard order + ticket creation
+      const order = await prisma.order.create({
+        data: {
+          id: orderId,
+          userId: user.id,
+          eventDateId,
+          ...orderData,
+          status: 'PENDING',
+        }
+      });
+      
+      console.log('✅ Order created with finalTotal:', order.finalTotal, 'originalTotal:', order.originalTotal);
+      
+      for (const ticket of ticketRows) {
         await prisma.ticket.create({
           data: {
-            orderId: orderId,
-            eventTicketTypeId: ticket.ticketTypeId,
-            amount: 1,
-            priceCharged: ticket.price, // Already in pence
-            secret: Math.random().toString(36).substr(2, 15),
-            firstName: customerData?.firstName || '',
-            lastName: customerData?.lastName || ''
+            orderId,
+            ...ticket,
           }
         });
       }

@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../lib/prisma';
 import { send } from '../../../lib/send';
 import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
+import { validateClaimSession } from '../../../lib/services/waitlist/claimSessionValidator';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'POST') {
@@ -59,10 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             console.log(`✅ Ticket sale end date check passed: sales end at ${saleEndDate.toISOString()}`);
         }
 
-        // CAPACITY CHECK: Use canonical availability service
-        console.log('🔒 Checking ticket capacity for free event...');
-        
-        // Validate ticket type IDs first
+        // Validate ticket type IDs
         for (const ticket of tickets) {
             const ticketTypeId = ticket.ticketTypeId || ticket.eventTicketTypeId;
             if (!ticketTypeId) {
@@ -70,22 +68,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 return res.status(400).json({ error: 'ticketTypeId or eventTicketTypeId required' });
             }
         }
-        
+
         const capacityItems = tickets.map((t: any) => ({
             eventTicketTypeId: t.ticketTypeId || t.eventTicketTypeId,
             quantity: t.amount
         }));
-        
-        const capacityCheck = await checkCapacityForOrder(eventDateIdParsed, capacityItems);
-        
-        if (!capacityCheck.success) {
-            const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
-            const errorDetails = 'details' in capacityCheck ? capacityCheck.details : undefined;
-            console.error(`❌ Capacity check failed: ${errorMessage}`);
-            return res.status(409).json({ 
-                error: errorMessage,
-                details: errorDetails
+
+        // WAITLIST CLAIM SESSION: check for controlled capacity bypass
+        const { claimSessionToken } = req.body;
+        let claimSessionValidation: Awaited<ReturnType<typeof validateClaimSession>> | null = null;
+
+        if (claimSessionToken) {
+            console.log('🎫 Validating waitlist claim session for free event...');
+            claimSessionValidation = await validateClaimSession({
+                claimSessionToken,
+                eventDateId: eventDateIdParsed,
+                tickets: capacityItems,
             });
+
+            if (!claimSessionValidation.valid) {
+                const validationError = 'error' in claimSessionValidation ? claimSessionValidation.error : 'Validation failed';
+                console.error(`❌ Claim session validation failed: ${validationError}`);
+                return res.status(400).json({ error: validationError });
+            }
+
+            console.log('✅ Waitlist claim session validated for free event - bypassing capacity check');
+        }
+
+        // CAPACITY CHECK: Use canonical availability service (skipped for valid claim sessions)
+        if (!claimSessionValidation?.valid) {
+            console.log('🔒 Checking ticket capacity for free event...');
+            
+            const capacityCheck = await checkCapacityForOrder(eventDateIdParsed, capacityItems);
+            
+            if (!capacityCheck.success) {
+                const errorMessage = 'error' in capacityCheck ? capacityCheck.error : 'Capacity check failed';
+                const errorDetails = 'details' in capacityCheck ? capacityCheck.details : undefined;
+                console.error(`❌ Capacity check failed: ${errorMessage}`);
+                return res.status(409).json({ 
+                    error: errorMessage,
+                    details: errorDetails
+                });
+            }
         }
         
         console.log('✅ All capacity checks passed, creating order...');
@@ -123,73 +147,133 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             });
         }
 
-        // Create order for free event
         const orderId = `free-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        
-        const order = await prisma.order.create({
-            data: {
-                id: orderId,
-                userId: user.id,
-                eventDateId: parseInt(eventDateId),
-                paymentType: 'Free',
-                status: 'CONFIRMED', // Free events are automatically confirmed
-                shipping: JSON.stringify({
-                    type: 'download',
-                    firstName: customerData.firstName,
-                    lastName: customerData.lastName,
-                    email: customerEmail
-                }),
-                locale: 'en-GB',
-                originalTotal: 0,
-                finalTotal: 0,
-                idempotencyKey: orderId,
-                cancellationSecret: Math.random().toString(36).substr(2, 15),
-                // Store custom fields on the order for this specific purchase
-                customFields: customerData.customFields ? JSON.stringify(customerData.customFields) : null
-            }
-        });
+        const cancellationSecret = Math.random().toString(36).substr(2, 15);
 
-        // Create tickets using EventTicketTypes
-        const createdTickets = [];
+        // Build ticket row data
+        const ticketRowInputs: Array<{ eventTicketTypeId: number; amount: number }> = [];
         for (const ticketData of tickets) {
             const eventTicketTypeId = ticketData.ticketTypeId || ticketData.eventTicketTypeId;
-            
-            console.log(`Creating tickets for eventTicketTypeId=${eventTicketTypeId}`);
-            
-            if (!eventTicketTypeId) {
-                console.error('No ticket type ID provided');
-                throw new Error('ticketTypeId or eventTicketTypeId required');
-            }
-
-            const ticketCreateData: any = {
-                orderId: order.id,
-                amount: ticketData.amount,
-                currency: 'GBP',
-                eventTicketTypeId
-            };
-
-            // Validate ticket type exists (should not reach here given earlier check)
-            if (!eventTicketTypeId) {
-                throw new Error('No valid ticket type (eventTicketTypeId) found');
-            }
-
+            if (!eventTicketTypeId) throw new Error('ticketTypeId or eventTicketTypeId required');
             for (let i = 0; i < ticketData.amount; i++) {
+                ticketRowInputs.push({ eventTicketTypeId, amount: ticketData.amount });
+            }
+        }
+
+        let order: any;
+        let createdTickets: any[] = [];
+
+        if (claimSessionValidation?.valid) {
+            // WAITLIST PATH: order + tickets + offer fulfilment in ONE transaction
+            const result = await prisma.$transaction(async (tx) => {
+                // Re-validate inside transaction
+                const cs = await tx.waitlistClaimSession.findUnique({ where: { id: claimSessionValidation.claimSession.id } });
+                if (!cs || cs.usedAt || new Date() >= cs.expiresAt) throw new Error('Claim session no longer valid');
+                const offer = await tx.waitlistOffer.findUnique({ where: { id: claimSessionValidation.offer.id } });
+                if (!offer || offer.status !== 'ACTIVE' || new Date() >= offer.expiresAt) throw new Error('Offer no longer valid');
+
+                const newOrder = await tx.order.create({
+                    data: {
+                        id: orderId,
+                        userId: user.id,
+                        eventDateId: eventDateIdParsed,
+                        paymentType: 'Free',
+                        status: 'CONFIRMED',
+                        shipping: JSON.stringify({ type: 'download', firstName: customerData.firstName, lastName: customerData.lastName, email: customerEmail }),
+                        locale: 'en-GB',
+                        originalTotal: 0,
+                        finalTotal: 0,
+                        idempotencyKey: orderId,
+                        cancellationSecret,
+                        customFields: customerData.customFields ? JSON.stringify(customerData.customFields) : null,
+                    }
+                });
+
+                const txTickets = [];
+                for (const input of ticketRowInputs) {
+                    const t = await tx.ticket.create({
+                        data: {
+                            orderId: newOrder.id,
+                            eventTicketTypeId: input.eventTicketTypeId,
+                            amount: 1,
+                            currency: 'GBP',
+                            secret: Math.random().toString(36).substring(2, 15),
+                            firstName: customerData.firstName,
+                            lastName: customerData.lastName,
+                        }
+                    });
+                    txTickets.push(t);
+                }
+
+                // Create order items for admin UI / invoices
+                for (const ticketData of tickets) {
+                    const eventTicketTypeId = ticketData.ticketTypeId || ticketData.eventTicketTypeId;
+                    await tx.orderItem.create({
+                        data: {
+                            orderId: newOrder.id,
+                            eventTicketTypeId,
+                            quantity: ticketData.amount,
+                            unitPrice: 0,
+                            currency: 'GBP',
+                        }
+                    });
+                }
+
+                await tx.waitlistClaimSession.update({ where: { id: cs.id }, data: { usedAt: new Date() } });
+                await tx.waitlistOffer.update({ where: { id: offer.id }, data: { status: 'CLAIMED', claimedAt: new Date() } });
+                await tx.waitlistEntry.update({
+                    where: { id: offer.waitlistEntryId },
+                    data: { status: 'FULFILLED', fulfillmentOrderId: newOrder.id },
+                });
+                await tx.waitlistAuditLog.create({
+                    data: { waitlistEntryId: offer.waitlistEntryId, waitlistOfferId: offer.id, eventDateId: eventDateIdParsed, action: 'OFFER_CLAIMED', metadataJson: JSON.stringify({ orderId: newOrder.id }) },
+                });
+                await tx.waitlistAuditLog.create({
+                    data: { waitlistEntryId: offer.waitlistEntryId, waitlistOfferId: offer.id, eventDateId: eventDateIdParsed, action: 'ENTRY_FULFILLED', metadataJson: JSON.stringify({ orderId: newOrder.id }) },
+                });
+
+                return { order: newOrder, tickets: txTickets };
+            });
+
+            order = result.order;
+            createdTickets = result.tickets;
+            console.log(`✅ Created free order ${order.id} and fulfilled waitlist offer ${claimSessionValidation.offer.id} in single transaction`);
+        } else {
+            // NORMAL PATH: standard order + ticket creation
+            order = await prisma.order.create({
+                data: {
+                    id: orderId,
+                    userId: user.id,
+                    eventDateId: eventDateIdParsed,
+                    paymentType: 'Free',
+                    status: 'CONFIRMED',
+                    shipping: JSON.stringify({ type: 'download', firstName: customerData.firstName, lastName: customerData.lastName, email: customerEmail }),
+                    locale: 'en-GB',
+                    originalTotal: 0,
+                    finalTotal: 0,
+                    idempotencyKey: orderId,
+                    cancellationSecret,
+                    customFields: customerData.customFields ? JSON.stringify(customerData.customFields) : null,
+                }
+            });
+
+            for (const input of ticketRowInputs) {
                 const ticket = await prisma.ticket.create({
                     data: {
-                        ...ticketCreateData,
+                        orderId: order.id,
+                        eventTicketTypeId: input.eventTicketTypeId,
+                        amount: 1,
+                        currency: 'GBP',
                         secret: Math.random().toString(36).substring(2, 15),
                         firstName: customerData.firstName,
-                        lastName: customerData.lastName
+                        lastName: customerData.lastName,
                     }
                 });
                 createdTickets.push(ticket);
             }
-            
-            // NOTE: EventTicketType.sold is deprecated and no longer updated.
-            // Availability is computed dynamically from Ticket rows via availability service.
-        }
 
-        console.log(`✅ Created ${createdTickets.length} free tickets for order ${order.id}`);
+            console.log(`✅ Created ${createdTickets.length} free tickets for order ${order.id}`);
+        }
 
         // Send confirmation email using modern email system
         try {

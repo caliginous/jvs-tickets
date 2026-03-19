@@ -5,7 +5,9 @@
  * Use this everywhere: validateOrder, public API, admin dashboards.
  *
  * Availability Rules:
- * - Capacity is counted per Ticket row, filtered by Order.status in CAPACITY_RESERVED_STATUSES
+ * - Capacity is counted per Ticket row, filtered by capacity-consuming orders
+ * - Capacity-consuming = always-reserved statuses + conditional statuses
+ *   (REFUNDED/CANCELLED) where inventoryReturnedToPool is false
  * - Tickets are never deleted for refunds; refunds affect counting via Order status only
  * - Do NOT use EventTicketType.sold - it's unreliable. Always compute from Tickets.
  *
@@ -17,7 +19,11 @@
  */
 
 import prisma from '../../prisma';
-import { CAPACITY_RESERVED_STATUSES } from '../../../constants/orderStatuses';
+import { buildCapacityConsumingOrderWhere } from './capacityWhere';
+import {
+  getActiveOfferReservedQuantities,
+  getTotalActiveOfferReservedQuantity,
+} from './waitlistAvailability';
 
 export interface TicketTypeAvailability {
   eventTicketTypeId: number;
@@ -28,9 +34,6 @@ export interface TicketTypeAvailability {
   sold: number;
   available: number | null; // null = unlimited
   isSoldOut: boolean;
-  // Note: isActive is NOT included. This function only returns active ticket types.
-  // Admin pages that need to display inactive types should use a separate function
-  // (e.g., computeAvailabilityAdmin) that includes { isActive: false } types.
 }
 
 export interface EventAvailability {
@@ -38,7 +41,7 @@ export interface EventAvailability {
   totalLimit: number | null;
   totalSold: number;
   totalAvailable: number | null;
-  globalRemaining: number | null; // Same as totalAvailable, explicit for clarity
+  globalRemaining: number | null;
   ticketTypes: TicketTypeAvailability[];
 }
 
@@ -48,7 +51,6 @@ export interface EventAvailability {
 export async function computeAvailability(
   eventDateId: number
 ): Promise<EventAvailability> {
-  // Get event date with ticket types
   const eventDate = await prisma.eventDate.findUnique({
     where: { id: eventDateId },
     include: {
@@ -67,52 +69,47 @@ export async function computeAvailability(
     throw new Error(`EventDate ${eventDateId} not found`);
   }
 
-  // Get sold counts per ticket type in ONE query (not a loop)
-  // Note: eventTicketTypeId is now NOT NULL (Phase 3.2), so no null filtering needed
+  const capacityOrderWhere = buildCapacityConsumingOrderWhere(eventDateId);
+
   const soldCounts = await prisma.ticket.groupBy({
     by: ['eventTicketTypeId'],
     where: {
-      order: {
-        eventDateId: eventDateId,
-        status: { in: [...CAPACITY_RESERVED_STATUSES] },
-      },
+      order: capacityOrderWhere,
     },
     _count: { id: true },
   });
 
-  // Build lookup map (eventTicketTypeId is now NOT NULL, no null check needed)
   const soldByType = new Map<number, number>();
   for (const row of soldCounts) {
     soldByType.set(row.eventTicketTypeId, row._count.id);
   }
 
-  // ROBUST totalSold: Use separate count query constrained only by eventDateId + reserved statuses.
-  // This stays correct even if weird rows with null eventTicketTypeId appear.
   const totalSold = await prisma.ticket.count({
     where: {
-      order: {
-        eventDateId: eventDateId,
-        status: { in: [...CAPACITY_RESERVED_STATUSES] },
-      },
+      order: capacityOrderWhere,
     },
   });
 
-  // Calculate per-type availability, clamped by global limit
+  // Active waitlist offers also reserve capacity and reduce public availability
+  const offerReservedByType = await getActiveOfferReservedQuantities(eventDateId);
+  const totalOfferReserved = await getTotalActiveOfferReservedQuantity(eventDateId);
+
   const globalLimit = eventDate.totalTicketLimit;
   const globalRemaining =
-    globalLimit !== null ? Math.max(0, globalLimit - totalSold) : null;
+    globalLimit !== null
+      ? Math.max(0, globalLimit - totalSold - totalOfferReserved)
+      : null;
 
   const ticketTypes: TicketTypeAvailability[] = eventDate.event.ticketTypes.map(
     (tt) => {
       const sold = soldByType.get(tt.id) || 0;
+      const offerReserved = offerReservedByType.get(tt.id) || 0;
 
-      // Per-type available (null if no per-type capacity)
       let typeAvailable: number | null = null;
       if (tt.capacity !== null) {
-        typeAvailable = Math.max(0, tt.capacity - sold);
+        typeAvailable = Math.max(0, tt.capacity - sold - offerReserved);
       }
 
-      // Clamp by global availability
       let available = typeAvailable;
       if (globalRemaining !== null) {
         if (available === null) {
@@ -157,7 +154,6 @@ export async function checkCapacityForOrder(
 > {
   const availability = await computeAvailability(eventDateId);
 
-  // Check global capacity
   const totalRequested = items.reduce((sum, item) => sum + item.quantity, 0);
   if (
     availability.totalAvailable !== null &&
@@ -169,7 +165,6 @@ export async function checkCapacityForOrder(
     };
   }
 
-  // Check per-type capacity
   const insufficientTypes: Record<number, number> = {};
   for (const item of items) {
     const typeAvailability = availability.ticketTypes.find(

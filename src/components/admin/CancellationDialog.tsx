@@ -75,10 +75,14 @@ export default function CancellationDialog({ isOpen, onClose, order, onCancellat
               </p>
               <ul className="mt-2 text-sm text-gray-500 list-disc list-inside">
                 <li>Cancel the booking and mark it as cancelled</li>
-                <li>Process a full refund through Stripe</li>
-                <li>Release any reserved seats back to inventory</li>
+                <li>Process a full refund through Stripe (if paid)</li>
                 <li>Send a cancellation email to the customer</li>
               </ul>
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                <p className="text-sm text-amber-800 font-medium">
+                  Cancelling this order does not automatically reopen the place. Capacity stays held until you explicitly return it to the pool.
+                </p>
+              </div>
               
               <div className="mt-4 p-3 bg-gray-50 rounded-md">
                 <p className="text-sm font-medium text-gray-700">Booking Details:</p>

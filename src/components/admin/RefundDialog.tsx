@@ -204,6 +204,15 @@ export default function RefundDialog({ isOpen, onClose, order, onRefundSuccess }
                     )}
                 </div>
 
+                {/* Gated Inventory Warning */}
+                {isFullRefund && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+                        <p className="text-sm text-amber-800 font-medium">
+                            Refunding this order does not automatically reopen the place. Capacity stays held until you explicitly return it to the pool.
+                        </p>
+                    </div>
+                )}
+
                 {/* Refund Summary */}
                 <div className="bg-blue-50 rounded-lg p-4 mb-6">
                     <h3 className="font-medium text-blue-900 mb-2">Refund Summary</h3>

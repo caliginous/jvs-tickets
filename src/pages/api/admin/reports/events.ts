@@ -2,7 +2,8 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { serverAuthenticate } from '../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../constants/interfaces';
 import prisma from '../../../../lib/prisma';
-import { CAPACITY_RESERVED_STATUSES_ARRAY, reservesCapacity } from '../../../../constants/orderStatuses';
+import { orderConsumesCapacity } from '../../../../constants/orderStatuses';
+import { capacityConsumingStatusFilter } from '../../../../lib/services/ticketing/capacityWhere';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'GET') {
@@ -26,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     include: {
                         orders: {
                             where: {
-                                status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+                                OR: capacityConsumingStatusFilter(),
                             },
                             include: {
                                 tickets: {
@@ -49,33 +50,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
         });
 
-        // Transform the data to include order summaries
         const eventsWithOrders = events.map(event => {
-            // Calculate total orders, tickets sold, and revenue across all dates
             let totalOrders = 0;
             let totalTicketsSold = 0;
             let totalRevenueInPence = 0;
+            let heldCapacityOrders = 0;
+            let heldCapacityTickets = 0;
 
             event.dates.forEach(date => {
                 date.orders.forEach(order => {
-                    // Only count capacity-reserved orders (CONFIRMED, PAID, COMPLETED, PARTIALLY_REFUNDED)
-                    if (reservesCapacity(order.status)) {
-                        totalOrders++;
-                        
-                        // Count tickets sold
+                    if (!orderConsumesCapacity(order)) return;
+
+                    totalOrders++;
+                    order.tickets.forEach(ticket => {
+                        totalTicketsSold += ticket.amount;
+                    });
+
+                    const isHeld = (order.status === 'REFUNDED' || order.status === 'CANCELLED')
+                        && !order.inventoryReturnedToPool;
+
+                    if (isHeld) {
+                        heldCapacityOrders++;
                         order.tickets.forEach(ticket => {
-                            totalTicketsSold += ticket.amount;
+                            heldCapacityTickets += ticket.amount;
                         });
-                        
-                        // Use order's finalTotal (what was actually paid after discounts)
-                        // This is stored in pence in the database
+                    } else {
                         const orderTotal = order.finalTotal || order.originalTotal || 0;
                         totalRevenueInPence += orderTotal;
                     }
                 });
             });
 
-            // Convert to pounds for frontend display
             const totalRevenue = totalRevenueInPence / 100;
 
             // Get the next upcoming date
@@ -109,8 +114,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     isActive: ticketType.isActive
                 })),
                 totalOrders,
-                totalTicketsSold, // Add the actual tickets sold count
-                totalRevenue: Math.round(totalRevenue * 100) / 100, // Round to 2 decimal places
+                totalTicketsSold,
+                totalRevenue: Math.round(totalRevenue * 100) / 100,
+                heldCapacityOrders,
+                heldCapacityTickets,
                 nextDate: nextDate?.date || null
             };
         });

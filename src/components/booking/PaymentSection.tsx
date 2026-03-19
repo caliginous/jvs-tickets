@@ -18,6 +18,7 @@ interface PaymentSectionProps {
   eventName?: string;
   eventDate?: string;
   onDiscountChange?: (discountInfo: any) => void;
+  claimSessionToken?: string | null;
 }
 
 export const PaymentSection: React.FC<PaymentSectionProps> = ({
@@ -30,7 +31,8 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
   eventDateId,
   eventName,
   eventDate,
-  onDiscountChange
+  onDiscountChange,
+  claimSessionToken
 }) => {
   const dispatch = useAppDispatch();
   const payment = useAppSelector(selectPayment);
@@ -350,13 +352,13 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
         <StripeCardForm
           onSuccess={(orderId) => {
             console.log('Order created successfully:', orderId);
-            // Handle successful order creation
             onComplete();
           }}
           eventDateId={eventDateId}
           eventName={eventName || 'Event'}
           eventDate={eventDate || new Date().toISOString()}
           discountInfo={discountInfo}
+          claimSessionToken={claimSessionToken}
         />
       </div>
 

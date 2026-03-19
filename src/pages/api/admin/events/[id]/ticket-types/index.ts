@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
-import { CAPACITY_RESERVED_STATUSES_ARRAY } from '../../../../../../constants/orderStatuses';
+import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ticketing/capacityWhere';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method === 'GET') {
@@ -31,13 +31,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 }
             });
 
-            // Compute sold counts from Ticket rows (not from deprecated sold column)
             const soldCounts = await prisma.ticket.groupBy({
                 by: ['eventTicketTypeId'],
                 where: {
                     eventTicketTypeId: { in: ticketTypes.map(tt => tt.id) },
                     order: {
-                        status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+                        OR: capacityConsumingStatusFilter(),
                     }
                 },
                 _count: { id: true }

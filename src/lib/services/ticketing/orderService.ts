@@ -6,7 +6,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { CAPACITY_RESERVED_STATUSES_ARRAY } from '../../../constants/orderStatuses';
+import { capacityConsumingStatusFilter } from './capacityWhere';
 // TODO: Import generateSecret after fixing import issues
 // import { generateSecret } from '../../constants/serverUtil';
 
@@ -402,7 +402,7 @@ export async function reserveCapacity(prisma: PrismaClient, items: OrderItem[]) 
       where: {
         eventTicketTypeId: item.eventTicketTypeId,
         order: {
-          status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+          OR: capacityConsumingStatusFilter(),
         }
       }
     });

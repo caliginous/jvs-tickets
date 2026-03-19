@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import Image from 'next/image';
@@ -12,6 +12,116 @@ import { UnifiedBookingPage } from '../../components/booking/UnifiedBookingPage'
 import { getOption } from '../../lib/options';
 import { Options } from '../../constants/Constants';
 import { computeAvailability } from '../../lib/services/ticketing/availability';
+
+function WaitlistJoinForm({ eventDateId, ticketTypes }: { eventDateId: number; ticketTypes: any[] }) {
+  const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [selectedTicketType, setSelectedTicketType] = useState(ticketTypes[0]?.id || 0);
+  const [quantity, setQuantity] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ success?: boolean; message?: string; error?: string } | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setResult(null);
+
+    try {
+      const resp = await fetch('/api/waitlist/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventDateId,
+          eventTicketTypeId: selectedTicketType,
+          email: email.trim(),
+          firstName: firstName.trim() || undefined,
+          lastName: lastName.trim() || undefined,
+          phone: phone.trim() || undefined,
+          quantity,
+        }),
+      });
+
+      const data = await resp.json();
+      if (resp.ok) {
+        setResult({ success: true, message: data.message || 'You have been added to the waitlist!' });
+      } else {
+        setResult({ error: data.error || 'Something went wrong. Please try again.' });
+      }
+    } catch {
+      setResult({ error: 'Network error. Please try again.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (result?.success) {
+    return (
+      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-8 text-center mt-6">
+        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+          <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold text-green-800 mb-1">You&apos;re on the waitlist!</h3>
+        <p className="text-green-700 text-sm">{result.message}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white border-2 border-blue-200 rounded-xl p-6 mt-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-1">Join the Waitlist</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        We&apos;ll email you if tickets become available. You&apos;ll have 30 minutes to complete your booking.
+      </p>
+
+      {result?.error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4">
+          <p className="text-sm text-red-700">{result.error}</p>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <input type="text" placeholder="First name" value={firstName} onChange={e => setFirstName(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500" />
+          <input type="text" placeholder="Last name" value={lastName} onChange={e => setLastName(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500" />
+        </div>
+        <input type="email" placeholder="Email *" required value={email} onChange={e => setEmail(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500" />
+        <input type="tel" placeholder="Phone (optional)" value={phone} onChange={e => setPhone(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500" />
+
+        {ticketTypes.length > 1 && (
+          <select value={selectedTicketType} onChange={e => setSelectedTicketType(Number(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500">
+            {ticketTypes.map(tt => (
+              <option key={tt.id} value={tt.id}>{tt.name}</option>
+            ))}
+          </select>
+        )}
+
+        <div className="flex items-center space-x-3">
+          <label className="text-sm text-gray-700">Quantity:</label>
+          <select value={quantity} onChange={e => setQuantity(Number(e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500">
+            {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </div>
+
+        <button type="submit" disabled={submitting || !email.trim()}
+          className="w-full py-2.5 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors text-sm">
+          {submitting ? 'Joining...' : 'Join Waitlist'}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 interface Event {
   id: number;
@@ -47,6 +157,7 @@ interface EventPageProps {
   impressUrl: string;
   isSoldOut: boolean;
   hasEnded: boolean;
+  claimSessionToken?: string | null;
 }
 
 export default function EventPage({
@@ -59,7 +170,8 @@ export default function EventPage({
   theme,
   impressUrl,
   isSoldOut,
-  hasEnded
+  hasEnded,
+  claimSessionToken
 }: EventPageProps) {
   // Generate Open Graph meta tags for social sharing
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://tickets.jvs.org.uk';
@@ -180,6 +292,46 @@ export default function EventPage({
     );
   }
 
+  // If sold out BUT user has a valid waitlist claim session, show the booking flow instead
+  if (isSoldOut && claimSessionToken) {
+    return (
+      <>
+        <Head>
+          <title>{ogTitle} | JVS Tickets</title>
+          <meta name="description" content={ogDescription} />
+          <meta property="og:title" content={ogTitle} />
+          <meta property="og:description" content={ogDescription} />
+          <meta property="og:url" content={pageUrl} />
+          <meta property="og:type" content="website" />
+          <meta property="og:site_name" content="Jewish Vegan Society" />
+          <meta property="og:image" content={ogImage} />
+        </Head>
+        <div className="min-h-screen bg-gray-50">
+          <Navbar />
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-center">
+              <p className="text-blue-800 font-medium">
+                You have a reserved waitlist offer. Complete your booking below before the offer expires.
+              </p>
+            </div>
+            <UnifiedBookingPage
+              event={event}
+              ticketTypes={event.ticketTypes}
+              paymentMethods={paymentMethods}
+              deliveryMethods={deliveryMethods}
+              shippingFees={shippingFees}
+              paymentFees={paymentFees}
+              theme={theme}
+              impressUrl={impressUrl}
+              claimSessionToken={claimSessionToken}
+            />
+          </div>
+          <Footer />
+        </div>
+      </>
+    );
+  }
+
   // Show sold out message if all tickets are unavailable
   if (isSoldOut) {
     return (
@@ -250,7 +402,7 @@ export default function EventPage({
             </div>
             <h2 className="text-2xl font-bold text-red-800 mb-2">Sold Out</h2>
             <p className="text-red-700 mb-6">
-              Sorry, all tickets for this event have been sold. Please check back later as more tickets may become available.
+              Sorry, all tickets for this event have been sold. Join the waitlist below and we&apos;ll notify you if tickets become available.
             </p>
             <a 
               href="/events"
@@ -262,6 +414,14 @@ export default function EventPage({
               Browse Other Events
             </a>
           </div>
+
+          {/* Waitlist Join Form */}
+          {eventDate && event.ticketTypes && event.ticketTypes.length > 0 && (
+            <WaitlistJoinForm
+              eventDateId={eventDate.id}
+              ticketTypes={event.ticketTypes}
+            />
+          )}
         </div>
 
         <Footer />
@@ -304,6 +464,7 @@ export default function EventPage({
             paymentFees={paymentFees}
             theme={theme}
             impressUrl={impressUrl}
+            claimSessionToken={claimSessionToken}
           />
         </div>
 
@@ -315,9 +476,10 @@ export default function EventPage({
 
 // Switched from getStaticProps to getServerSideProps for reliable, real-time data
 // This eliminates ISR cache issues and 404 problems
-export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ params }) => {
+export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ params, query }) => {
   try {
     const slug = params?.slug as string;
+    const claimSessionToken = (typeof query?.claimSession === 'string' ? query.claimSession : null) || null;
     
     if (!slug) {
       return { notFound: true };
@@ -471,7 +633,8 @@ export const getServerSideProps: GetServerSideProps<EventPageProps> = async ({ p
         theme: await getOption(Options.Theme),
         impressUrl: await getOption(Options.ImpressUrl),
         isSoldOut,
-        hasEnded
+        hasEnded,
+        claimSessionToken
       }
     };
   } catch (error) {

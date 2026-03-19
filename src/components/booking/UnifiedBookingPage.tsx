@@ -36,6 +36,7 @@ interface UnifiedBookingPageProps {
   paymentFees: any;
   theme: any;
   impressUrl: string;
+  claimSessionToken?: string | null;
 }
 
 export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
@@ -46,7 +47,8 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
   shippingFees,
   paymentFees,
   theme,
-  impressUrl
+  impressUrl,
+  claimSessionToken
 }) => {
   const router = useRouter();
   const dispatch = useAppDispatch();
@@ -773,7 +775,10 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
                   shippingFees={shippingFees}
                   paymentFees={paymentFees}
                   eventDateId={event?.id || selectedEvent}
+                  eventName={event?.name || event?.title}
+                  eventDate={event?.date}
                   onDiscountChange={setDiscountInfo}
+                  claimSessionToken={claimSessionToken}
                 />
                 {/* Debug info */}
                 {process.env.NODE_ENV === 'development' && (

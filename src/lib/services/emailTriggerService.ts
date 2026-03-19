@@ -439,6 +439,68 @@ export class EmailTriggerService {
   }
 
   /**
+   * Send a waitlist offer email (tickets now available)
+   */
+  async sendWaitlistOffer(data: {
+    userEmail: string;
+    userFirstName: string;
+    userLastName: string;
+    eventTitle: string;
+    eventDate: string;
+    eventTime: string;
+    eventLocation: string;
+    ticketTypeName: string;
+    quantity: number;
+    expiresAt: string;
+    claimLink: string;
+    locale: string;
+  }): Promise<EmailTriggerResult> {
+    try {
+      console.log('📧 [EMAIL TRIGGER] Sending waitlist offer email to:', data.userEmail);
+
+      const mappedPayload = {
+        user: {
+          firstName: data.userFirstName || 'there',
+          lastName: data.userLastName || '',
+          email: data.userEmail
+        },
+        event: {
+          title: data.eventTitle,
+          date: data.eventDate,
+          location: data.eventLocation,
+          time: data.eventTime
+        },
+        offer: {
+          ticketType: data.ticketTypeName,
+          quantity: data.quantity,
+          expiresAt: data.expiresAt,
+          claimLink: data.claimLink,
+          expiryMinutes: 30
+        },
+        ...(await getEmailCommonData())
+      };
+
+      const result = await this.sendTemplatedEmail({
+        templateType: 'waitlist_offer',
+        recipientEmail: data.userEmail,
+        locale: data.locale,
+        payload: mappedPayload
+      });
+
+      if (result.success) {
+        console.log('✅ [EMAIL TRIGGER] Waitlist offer email sent successfully');
+      } else {
+        console.error('❌ [EMAIL TRIGGER] Failed to send waitlist offer email:', result.error);
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ [EMAIL TRIGGER] Error sending waitlist offer email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
    * Generic method to send templated emails
    */
   private async sendTemplatedEmail(data: EmailTriggerData): Promise<EmailTriggerResult> {

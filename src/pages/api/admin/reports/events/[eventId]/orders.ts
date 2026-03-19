@@ -2,7 +2,8 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { serverAuthenticate } from '../../../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
 import prisma from '../../../../../../lib/prisma';
-import { CAPACITY_RESERVED_STATUSES_ARRAY, reservesCapacity } from '../../../../../../constants/orderStatuses';
+import { orderConsumesCapacity } from '../../../../../../constants/orderStatuses';
+import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ticketing/capacityWhere';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'GET') {
@@ -28,17 +29,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(400).json({ message: 'Event ID must be a valid number' });
         }
 
-        // Find the event and its dates
-        // Only include capacity-reserved orders (CONFIRMED, PAID, COMPLETED, PARTIALLY_REFUNDED)
         const event = await prisma.event.findUnique({
             where: { id: eventIdNum },
             include: {
-                customFields: true, // Include custom field definitions
+                customFields: true,
                 dates: {
                     include: {
                         orders: {
                             where: {
-                                status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
+                                OR: capacityConsumingStatusFilter(),
                             },
                             include: {
                                 user: true,
@@ -58,39 +57,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(404).json({ message: 'Event not found' });
         }
 
-        // Transform orders data to match the frontend interface
         const orders = [];
         
         for (const eventDate of event.dates) {
             for (const order of eventDate.orders) {
-                // Only include capacity-reserved orders (already filtered at query level, but double-check)
-                if (reservesCapacity(order.status)) {
-                    // Get all ticket types for this order
-                    const ticketTypes = order.tickets.map(ticket => {
-                        const typeName = ticket.eventTicketType?.name || 'Standard';
-                        return `${ticket.amount}× ${typeName}`;
-                    }).join(', ');
-                    
-                    const totalQuantity = order.tickets.reduce((sum, ticket) => sum + ticket.amount, 0);
-                    
-                    // Use order's finalTotal (what was actually paid after discounts)
-                    const orderTotal = (order.finalTotal || order.originalTotal || 0) / 100; // Convert pence to pounds
-                    
-                    console.log(`[EventOrders] Order ${order.id}: tickets="${ticketTypes}", qty=${totalQuantity}, actualTotal=£${orderTotal.toFixed(2)} (finalTotal: ${order.finalTotal}, originalTotal: ${order.originalTotal})`);
-                    
-                    orders.push({
-                        id: order.id,
-                        customerName: `${order.user.firstName} ${order.user.lastName}`,
-                        email: order.user.email,
-                        phone: order.user.phone || '',
-                        ticketType: ticketTypes,
-                        quantity: totalQuantity,
-                        total: orderTotal, // Actual amount paid (after discounts)
-                        status: order.status,
-                        arrived: false,
-                        customFields: order.customFields
-                    });
-                }
+                if (!orderConsumesCapacity(order)) continue;
+
+                const ticketTypes = order.tickets.map(ticket => {
+                    const typeName = ticket.eventTicketType?.name || 'Standard';
+                    return `${ticket.amount}× ${typeName}`;
+                }).join(', ');
+                
+                const totalQuantity = order.tickets.reduce((sum, ticket) => sum + ticket.amount, 0);
+                const orderTotal = (order.finalTotal || order.originalTotal || 0) / 100;
+
+                const isHeldCapacity = (order.status === 'REFUNDED' || order.status === 'CANCELLED')
+                    && !order.inventoryReturnedToPool;
+                
+                orders.push({
+                    id: order.id,
+                    customerName: `${order.user.firstName} ${order.user.lastName}`,
+                    email: order.user.email,
+                    phone: order.user.phone || '',
+                    ticketType: ticketTypes,
+                    quantity: totalQuantity,
+                    total: orderTotal,
+                    status: order.status,
+                    inventoryStatus: isHeldCapacity ? 'HELD' : 'ACTIVE',
+                    arrived: false,
+                    customFields: order.customFields
+                });
             }
         }
 

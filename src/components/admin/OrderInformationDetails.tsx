@@ -70,6 +70,39 @@ export const hasPayedIcon = (order: any) => {
     );
 };
 
+const InventoryStatusBadge = ({ order, onReturnToPool }: { order: any; onReturnToPool?: () => void }) => {
+    const isConditional = order.status === 'REFUNDED' || order.status === 'CANCELLED';
+    if (!isConditional) return null;
+
+    const isReturned = order.inventoryReturnedToPool;
+
+    return (
+        <div className="mt-3 p-3 rounded-md border" style={{ borderColor: isReturned ? '#d1fae5' : '#fef3c7', backgroundColor: isReturned ? '#ecfdf5' : '#fffbeb' }}>
+            <div className="flex items-center justify-between">
+                <div>
+                    <p className="text-sm font-medium" style={{ color: isReturned ? '#065f46' : '#92400e' }}>
+                        Inventory: {isReturned ? 'Returned to pool' : 'Held from resale'}
+                    </p>
+                    {isReturned && order.inventoryReturnedAt && (
+                        <p className="text-xs mt-0.5" style={{ color: '#065f46' }}>
+                            Returned {new Date(order.inventoryReturnedAt).toLocaleDateString('en-GB')}
+                            {order.inventoryReturnedBy ? ` by ${order.inventoryReturnedBy}` : ''}
+                        </p>
+                    )}
+                </div>
+                {!isReturned && onReturnToPool && (
+                    <button
+                        onClick={onReturnToPool}
+                        className="ml-3 px-3 py-1.5 text-xs font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-md transition-colors"
+                    >
+                        Return to pool
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
 export const OrderPaymentInformationDetails = ({ order, onMarkAsPayed }: { order: any; onMarkAsPayed: () => void }) => {
     const handleMarkAsPayed = async () => {
         try {
@@ -109,6 +142,21 @@ export const OrderPaymentInformationDetails = ({ order, onMarkAsPayed }: { order
                     {hasPayedIcon(order)}
                 </p>
                 
+                <InventoryStatusBadge
+                    order={order}
+                    onReturnToPool={async () => {
+                        try {
+                            const resp = await axios.post(`/api/admin/bookings/${order.id}/return-to-pool`);
+                            if (resp.data.success) {
+                                showToast.success("Inventory returned to pool");
+                                onMarkAsPayed();
+                            }
+                        } catch (e: any) {
+                            showToast.error("Error: " + (e?.response?.data?.error ?? e.message));
+                        }
+                    }}
+                />
+
                 {/* Show refund information if order is refunded */}
                 {(order.status === "REFUNDED" || order.status === "PARTIALLY_REFUNDED") && order.paymentResult && (
                     <div className="mt-2 p-3 bg-gray-50 rounded-md">

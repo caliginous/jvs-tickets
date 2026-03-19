@@ -7,10 +7,11 @@ interface StripeCardFormProps {
   eventDateId: number;
   eventName: string;
   eventDate: string;
-  discountInfo?: any; // Add discount info prop
+  discountInfo?: any;
+  claimSessionToken?: string | null;
 }
 
-export default function StripeCardForm({ onSuccess, eventDateId, eventName, eventDate, discountInfo }: StripeCardFormProps) {
+export default function StripeCardForm({ onSuccess, eventDateId, eventName, eventDate, discountInfo, claimSessionToken }: StripeCardFormProps) {
   const dispatch = useAppDispatch();
   const order = useAppSelector((state) => state.order);
   const personalInfo = useAppSelector((state) => state.personalInformation);
@@ -84,7 +85,9 @@ export default function StripeCardForm({ onSuccess, eventDateId, eventName, even
           } : null,
           // Pass totals for proper calculation (in pence)
           finalTotal: finalTotalInPence,
-          originalTotal: originalTotalInPence
+          originalTotal: originalTotalInPence,
+          // Waitlist claim session (bypasses capacity check for offered tickets)
+          ...(claimSessionToken ? { claimSessionToken } : {}),
         }),
       });
 
@@ -126,7 +129,8 @@ export default function StripeCardForm({ onSuccess, eventDateId, eventName, even
               countryCode: personalInfo.address.country?.countryShortCode || 'GB',
               regionCode: personalInfo.address.region?.shortCode || '',
               customFields: personalInfo.customFields || {}
-            }
+            },
+            ...(claimSessionToken ? { claimSessionToken } : {}),
           }),
         });
         

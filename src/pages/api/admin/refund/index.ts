@@ -141,7 +141,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     }
                 }),
                 finalTotal: isFullRefund ? 0 : (order.finalTotal || order.originalTotal || 0) - refundAmount,
-                discountAmount: refundAmount // Store refund amount
+                discountAmount: refundAmount,
+                refundAmount: refundAmount,
+                refundId: refund.id,
+                refundedAt: new Date(),
+                // Gated inventory: refund does not auto-release capacity
+                ...(isFullRefund ? {
+                    inventoryReturnedToPool: false,
+                    inventoryReturnedAt: null,
+                    inventoryReturnedBy: null,
+                } : {}),
             }
         });
 

@@ -45,6 +45,8 @@ model EventTicketType {
   event           Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
   orderItems      OrderItem[]
   tickets         Ticket[]
+  waitlistEntries WaitlistEntry[]
+  waitlistOffers  WaitlistOffer[]
 
   @@unique([eventId, name])
   @@index([eventId])
@@ -61,6 +63,8 @@ model EventDate {
   ticketSaleEndDate   DateTime?
   event               Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   orders              Order[]
+  waitlistEntries     WaitlistEntry[]
+  waitlistOffers      WaitlistOffer[]
 }
 
 model CustomField {
@@ -114,6 +118,11 @@ model Order {
   refundId           String?
   refundedAt         DateTime?
   customFields       String?       // JSON string of custom field responses for this order
+
+  inventoryReturnedToPool Boolean   @default(false)
+  inventoryReturnedAt     DateTime?
+  inventoryReturnedBy     String?
+
   discountCode       DiscountCode? @relation(fields: [discountCodeId], references: [id])
   eventDate          EventDate     @relation(fields: [eventDateId], references: [id], onDelete: Cascade)
   user               User          @relation(fields: [userId], references: [id])
@@ -127,6 +136,7 @@ model Order {
   @@index([status])
   @@index([cancelledAt])
   @@index([refundId])
+  @@index([inventoryReturnedToPool])
 }
 
 model OrderItem {
@@ -339,4 +349,83 @@ model EmailTest {
 
   @@index([success])
   @@index([testedAt])
+}
+
+model WaitlistEntry {
+  id                 String   @id @default(uuid())
+  eventDateId        Int
+  eventTicketTypeId  Int
+  email              String
+  firstName          String?
+  lastName           String?
+  phone              String?
+  requestedQuantity  Int
+  status             String   @default("ACTIVE")
+  source             String?
+  notes              String?
+  fulfillmentOrderId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  eventDate          EventDate       @relation(fields: [eventDateId], references: [id], onDelete: Cascade)
+  eventTicketType    EventTicketType @relation(fields: [eventTicketTypeId], references: [id], onDelete: Cascade)
+  offers             WaitlistOffer[]
+
+  @@index([eventDateId, eventTicketTypeId, status, createdAt])
+  @@index([email])
+  @@index([fulfillmentOrderId])
+}
+
+model WaitlistOffer {
+  id                String   @id @default(uuid())
+  waitlistEntryId   String
+  eventDateId       Int
+  eventTicketTypeId Int
+  quantity          Int
+  status            String   @default("ACTIVE")
+  offerToken        String   @unique
+  expiresAt         DateTime
+  claimedAt         DateTime?
+  declinedAt        DateTime?
+  expiredAt         DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdBy         String?
+  sourceOrderId     String?
+  notes             String?
+
+  waitlistEntry     WaitlistEntry   @relation(fields: [waitlistEntryId], references: [id], onDelete: Cascade)
+  eventDate         EventDate       @relation(fields: [eventDateId], references: [id], onDelete: Cascade)
+  eventTicketType   EventTicketType @relation(fields: [eventTicketTypeId], references: [id], onDelete: Cascade)
+
+  @@index([eventDateId, eventTicketTypeId, status, expiresAt])
+  @@index([offerToken])
+}
+
+model WaitlistAuditLog {
+  id                String   @id @default(uuid())
+  waitlistEntryId   String?
+  waitlistOfferId   String?
+  eventDateId       Int?
+  eventTicketTypeId Int?
+  action            String
+  actor             String?
+  metadataJson      String?
+  createdAt         DateTime @default(now())
+
+  @@index([waitlistEntryId])
+  @@index([waitlistOfferId])
+  @@index([eventDateId, eventTicketTypeId, createdAt])
+}
+
+model WaitlistClaimSession {
+  id              String   @id @default(uuid())
+  waitlistOfferId String
+  token           String   @unique
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([waitlistOfferId])
 }

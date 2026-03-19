@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../lib/prisma";
 import { getEventUrl } from "../../utils/slug";
-import { CAPACITY_RESERVED_STATUSES_ARRAY } from "../../constants/orderStatuses";
+import { buildCapacityConsumingOrderWhere } from "../../lib/services/ticketing/capacityWhere";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Only allow GET requests - reject all other methods
@@ -41,12 +41,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!nextDate) return null;
 
       // Get global ticket limit and sold count for this event date
+      const capacityWhere = buildCapacityConsumingOrderWhere(nextDate.id);
       const globalTicketStats = await prisma.ticket.aggregate({
         where: {
-          order: {
-            eventDateId: nextDate.id,
-            status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
-          }
+          order: capacityWhere,
         },
         _count: {
           id: true
@@ -57,10 +55,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const ticketTypeStats = await prisma.ticket.groupBy({
         by: ['eventTicketTypeId'],
         where: {
-          order: {
-            eventDateId: nextDate.id,
-            status: { in: CAPACITY_RESERVED_STATUSES_ARRAY }
-          }
+          order: capacityWhere,
         },
         _count: {
           id: true

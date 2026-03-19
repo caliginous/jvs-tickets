@@ -738,7 +738,12 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                     where: { id: orderId },
                     data: { 
                         paymentResult: JSON.stringify(event),
-                        status: "CANCELLED"
+                        status: "CANCELLED",
+                        cancelledAt: new Date(),
+                        cancelledBy: "stripe",
+                        inventoryReturnedToPool: false,
+                        inventoryReturnedAt: null,
+                        inventoryReturnedBy: null,
                     }
                 });
                 console.log(`[webhook/stripe] ✅ Successfully processed payment_intent.canceled for order: ${orderId}`);
@@ -785,6 +790,7 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                 const refundReason = refund ? refund.reason : 'unknown';
                 
                 // Update order status and store refund information properly
+                // Gated inventory: refund does not auto-release capacity
                 const existingPaymentResult = JSON.parse(order.paymentResult || '{}');
                 await prisma.order.update({
                     where: { id: orderId },
@@ -793,7 +799,7 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                             ...existingPaymentResult,
                             refund: {
                                 id: refund?.id,
-                                amount: refundAmountInPence, // Store refund amount in pence
+                                amount: refundAmountInPence,
                                 reason: refundReason,
                                 timestamp: new Date().toISOString(),
                                 stripeRefundId: refund?.id
@@ -801,8 +807,13 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                             webhookEvent: event
                         }),
                         status: "REFUNDED",
-                        finalTotal: 0 // Set to 0 for full refunds
-                        // No longer misuse discountAmount field
+                        finalTotal: 0,
+                        refundAmount: refundAmountInPence,
+                        refundId: refund?.id,
+                        refundedAt: new Date(),
+                        inventoryReturnedToPool: false,
+                        inventoryReturnedAt: null,
+                        inventoryReturnedBy: null,
                     }
                 });
                 
