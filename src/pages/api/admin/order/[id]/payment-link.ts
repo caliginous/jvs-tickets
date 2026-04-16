@@ -1,11 +1,19 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../../../../lib/prisma";
 import { createPaymentLink } from "../../../../../lib/stripe";
+import { serverAuthenticate } from "../../../../../constants/serverUtil";
+import { PermissionSection, PermissionType } from "../../../../../constants/interfaces";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  const actor = await serverAuthenticate(req, res, {
+    permission: PermissionSection.Orders,
+    permissionType: PermissionType.Write
+  });
+  if (!actor) return;
 
   try {
     const { id } = req.query;
@@ -103,22 +111,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     } catch (stripeError) {
       console.error(`[admin/order/[id]/payment-link] ❌ Error creating Stripe payment link for order ${order.id}:`, stripeError);
-      
-      // Return error with order details for manual processing
       return res.status(500).json({
         error: "Failed to generate Stripe payment link",
-        orderDetails: {
-          id: order.id,
-          total: order.finalTotal,
-          customerEmail: order.user?.email,
-          eventName: order.eventDate?.event?.title,
-          eventDate: order.eventDate?.date,
-          tickets: order.tickets.map(t => ({
-            ticketType: t.eventTicketType?.name,
-            amount: t.amount,
-            price: t.eventTicketType?.price
-          }))
-        },
         message: "Please try again or contact support if the issue persists"
       });
     }

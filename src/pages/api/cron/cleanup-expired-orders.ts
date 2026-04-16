@@ -25,13 +25,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Verify cron secret in production
+  // Verify cron secret. In production CRON_SECRET MUST be set — refuse otherwise so a
+  // missing env var cannot accidentally open this endpoint to the public.
+  const cronSecret = process.env.CRON_SECRET;
   if (process.env.NODE_ENV === 'production') {
-    const cronSecret = process.env.CRON_SECRET;
-    const authHeader = req.headers.authorization;
-    
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    if (!cronSecret) {
+      console.error('[cleanup-expired-orders] CRON_SECRET is not configured');
+      return res.status(500).json({ error: 'Server misconfigured' });
+    }
+    const authHeader = req.headers.authorization ?? '';
+    if (authHeader !== `Bearer ${cronSecret}`) {
       console.warn('[cleanup-expired-orders] Unauthorized cron request');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  } else if (cronSecret) {
+    // In dev, require the header if a secret is set.
+    const authHeader = req.headers.authorization ?? '';
+    if (authHeader !== `Bearer ${cronSecret}`) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
   }

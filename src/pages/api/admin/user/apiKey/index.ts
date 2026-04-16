@@ -3,6 +3,7 @@ import {
     hashPassword,
     serverAuthenticate
 } from "../../../../../constants/serverUtil";
+import { PermissionSection, PermissionType } from "../../../../../constants/interfaces";
 import prisma from "../../../../../lib/prisma";
 import * as crypto from "crypto";
 
@@ -10,7 +11,10 @@ export default async function handler(
     req: NextApiRequest,
     res: NextApiResponse
 ) {
-    const user = await serverAuthenticate(req, res);
+    const user = await serverAuthenticate(req, res, {
+        permission: PermissionSection.UserManagement,
+        permissionType: PermissionType.Write
+    });
     if (!user) return;
 
     if (req.method === "POST") {

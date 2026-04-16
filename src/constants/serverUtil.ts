@@ -50,7 +50,8 @@ export function getStaticAssetFile(file, options = null) {
 }
 
 export const hashPassword = async (password: string) => {
-    return await bycrypt.hash(password, 10);
+    // bcrypt cost 12 is a reasonable 2026 default for admin accounts.
+    return await bycrypt.hash(password, 12);
 };
 
 const checkPermissions = async (
@@ -103,25 +104,10 @@ export const getAdminServerSideProps = async (
     resultFunction?,
     permission?: Permission
 ) => {
-    console.log('[ADMIN] getAdminServerSideProps called for path:', context.req.url);
-
     try {
-        console.log('[ADMIN] Getting token...');
         const token = await getToken({ req: context.req });
-        console.log('[ADMIN] Token result:', token ? 'Token found' : 'No token');
-        if (token) {
-            console.log('[ADMIN] Token details:', {
-                email: token.email,
-                name: token.name,
-                hasEmail: !!token.email,
-                hasName: !!token.name
-            });
-        }
-        console.log('[ADMIN] Request headers cookie:', context.req.headers.cookie ? 'Present' : 'Missing');
 
-        // If no token or no email, redirect to login page
         if (!token || !token.email) {
-            console.log('[ADMIN] No token or email found, redirecting to login');
             return {
                 redirect: {
                     destination: '/admin/login',
@@ -130,10 +116,7 @@ export const getAdminServerSideProps = async (
             };
         }
 
-        console.log(`[ADMIN] Checking permissions for user: ${token.email}`);
-
         if (!(await checkPermissions(token.email, permission))) {
-            console.log(`[ADMIN] Permission denied for user: ${token.email}`);
             return {
                 props: {
                     permissionDenied: true,
@@ -142,20 +125,16 @@ export const getAdminServerSideProps = async (
             };
         }
 
-        console.log('[ADMIN] Permissions granted, executing result function...');
         const result = resultFunction ? (await resultFunction(token)) ?? {} : {};
         if (!result.props) result.props = {};
 
-        // Explicitly set permissionDenied to false when access is granted
         result.props.permissionDenied = false;
         result.props.session = token;
         result.props.authStep = 'success';
 
-        console.log('[ADMIN] Authentication successful');
         return result;
     } catch (error) {
-        console.error('[ADMIN] Error in getAdminServerSideProps:', error);
-        // On error, redirect to login to be safe
+        console.error('[ADMIN] Error in getAdminServerSideProps');
         return {
             redirect: {
                 destination: '/admin/login',
@@ -189,47 +168,43 @@ export const serverAuthenticate = async (
     permission?: Permission,
     sendResponse: boolean = true
 ) => {
-    console.log('serverAuthenticate called:', {
-        hasAuthHeader: !!req.headers.authorization,
-        hasCookie: !!req.headers.cookie,
-        permission: permission
-    });
-
     const apiKey =
         req.headers.authorization?.startsWith("Bearer") ?? null
             ? req.headers.authorization.replace("Bearer ", "")
             : null;
     let user;
     if (apiKey !== null) {
-        console.log('Using API key authentication');
         user = await getUserByApiKey(apiKey);
     } else {
-        console.log('Using JWT token authentication');
         try {
-            const token = await getToken({ 
-                req, 
-                secret: process.env.NEXTAUTH_SECRET || "fallback-secret-for-development-only"
-            });
-            console.log('JWT token result:', token ? 'Found token' : 'No token', token ? { email: token.email, hasEmail: !!token.email } : '');
-            if (token && token.email) {
-                user = { email: token.email };
+            const secret = process.env.NEXTAUTH_SECRET;
+            if (!secret) {
+                if (process.env.NODE_ENV === "production") {
+                    if (sendResponse) res.status(500).end("Server misconfigured");
+                    return null;
+                }
+                // Dev fallback only — never used in production because of the guard above.
+                const token = await getToken({ req, secret: "dev-only-do-not-use-in-production" });
+                if (token && token.email) user = { email: token.email };
+            } else {
+                const token = await getToken({ req, secret });
+                if (token && token.email) {
+                    user = { email: token.email };
+                }
             }
         } catch (error) {
-            console.error('JWT token parsing error:', error.message);
+            // Do not log token details or error messages that might echo secrets.
+            console.error("[serverAuthenticate] JWT verification failed");
         }
     }
     if (!user) {
-        console.log('No user found, authentication failed');
         if (sendResponse) res.status(401).end("Unauthenticated");
         return null;
     }
-    console.log('User found:', user.email, 'checking permissions...');
     if (!(await checkPermissions(user.email, permission))) {
-        console.log('Permission check failed for user:', user.email);
-        if (sendResponse) res.status(401).end("Permission denied");
+        if (sendResponse) res.status(403).end("Permission denied");
         return null;
     }
-    console.log('Authentication successful for user:', user.email);
     return user;
 };
 
@@ -327,6 +302,16 @@ export const revalidateBuild = async (res: NextApiResponse, page: string | strin
             logger.revalidate(`Skipping revalidation for unknown path: ${page} (pagePath: ${pagePath})`);
             return;
         }
+
+        // /events/[slug] uses getServerSideProps only (see pages/events/[slug].tsx).
+        // res.revalidate() expects ISR/static pages and fails with "Invalid response 200".
+        const normalizedPath = pagePath.startsWith("/") ? pagePath : `/${pagePath}`;
+        if (/^\/events\/.+/.test(normalizedPath)) {
+            logger.revalidate(
+                `Skipping on-demand revalidate for SSR page /events/[slug] (use MAIN_SITE_REVALIDATE_* for marketing site): ${page}`
+            );
+            return;
+        }
         
         logger.revalidate(`Path ${page} is valid, proceeding with revalidation`);
         await res.revalidate(page);
@@ -343,6 +328,54 @@ export const revalidateEventPages = async (res, additionalPages: string[]) => {
 
     await revalidateBuild(res, eventPaths.concat(additionalPages));
 };
+
+export type MainSiteEventRevalidateAction =
+    | "event_created"
+    | "event_updated"
+    | "event_deleted";
+
+/**
+ * Notify the main marketing site (e.g. jvs.org.uk App Router) to revalidate ISR event pages.
+ * Set MAIN_SITE_REVALIDATE_URL and MAIN_SITE_REVALIDATE_SECRET (same secret as that site's REVALIDATION_SECRET).
+ */
+export async function requestMainSiteEventRevalidation(payload: {
+    action: MainSiteEventRevalidateAction;
+    eventId: number;
+    slug?: string | null;
+}): Promise<void> {
+    const url = process.env.MAIN_SITE_REVALIDATE_URL?.trim();
+    const secret = process.env.MAIN_SITE_REVALIDATE_SECRET?.trim();
+    if (!url || !secret) {
+        logger.revalidate(
+            "Main site event revalidation skipped (MAIN_SITE_REVALIDATE_URL or MAIN_SITE_REVALIDATE_SECRET not set)"
+        );
+        return;
+    }
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                secret,
+                action: payload.action,
+                eventId: payload.eventId,
+                ...(payload.slug ? { slug: payload.slug } : {}),
+            }),
+        });
+        const text = await response.text();
+        if (!response.ok) {
+            logger.error(
+                `Main site revalidation failed: ${response.status} ${text.slice(0, 500)}`
+            );
+        } else {
+            logger.revalidate(
+                `Main site revalidation OK (${payload.action} event ${payload.eventId})`
+            );
+        }
+    } catch (e) {
+        logger.error("Main site revalidation request error:", e);
+    }
+}
 
 /**
  * Ticket selection for order validation

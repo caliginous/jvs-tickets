@@ -3,6 +3,8 @@ import { createCheckoutSession } from '../../../lib/stripe';
 import prisma from '../../../lib/prisma';
 import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
 import { validateClaimSession, createOrderWithWaitlistFulfilment } from '../../../lib/services/waitlist/claimSessionValidator';
+import { computeOrderTotals, PricingError } from '../../../lib/services/pricing/computeOrderTotals';
+import { reserveOrderAtomically } from '../../../lib/services/ticketing/reserveAtomic';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -15,8 +17,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log('=== STRIPE CHECKOUT SESSION API START ===');
     console.log('Request body:', req.body);
 
-    // Parse request body
-    const { tickets, eventDateId, eventName, eventDate, customerEmail, customerData, discountInfo, finalTotal, originalTotal } = req.body;
+    // Parse request body — client-supplied money fields (price, finalTotal, originalTotal,
+    // discountInfo.discountAmount) are IGNORED; totals are recomputed server-side.
+    const { tickets, eventDateId, eventName, eventDate, customerEmail, customerData, discountInfo } = req.body;
 
     // Validate required fields
     if (!tickets || !Array.isArray(tickets) || tickets.length === 0) {
@@ -31,22 +34,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Validate customer data if provided
     if (customerData && (!customerData.firstName || !customerData.lastName)) {
-      console.error('❌ Validation failed: Customer data incomplete', customerData);
+      console.error('❌ Validation failed: Customer data incomplete');
       return res.status(400).json({ error: 'Customer data incomplete' });
     }
 
-    // Validate ticket structure and normalize field names
-    // Accept both ticketTypeId and categoryId for backwards compatibility
+    // Normalise ticket input. Accept both ticketTypeId and categoryId; ignore client price/name.
     for (const ticket of tickets) {
-      // Normalize: if categoryId is provided but not ticketTypeId, use categoryId
       if (!ticket.ticketTypeId && ticket.categoryId) {
         ticket.ticketTypeId = ticket.categoryId;
       }
-      
-      if (!ticket.ticketTypeId || !ticket.amount || ticket.price === undefined || ticket.price === null || !ticket.name) {
-        console.error('❌ Validation failed: Invalid ticket structure', ticket);
+      if (!ticket.ticketTypeId || !ticket.amount) {
         return res.status(400).json({ error: 'Invalid ticket structure - ticketTypeId or categoryId required' });
       }
+    }
+
+    // TRUSTED PRICING: ignore all client money fields; compute from DB.
+    let pricing;
+    try {
+      pricing = await computeOrderTotals({
+        eventDateId,
+        tickets: tickets.map((t: any) => ({ ticketTypeId: t.ticketTypeId, amount: t.amount })),
+        discountCode: discountInfo?.code ?? null
+      });
+    } catch (e) {
+      if (e instanceof PricingError) {
+        return res.status(e.status).json({ error: e.message });
+      }
+      throw e;
+    }
+
+    // Reassign trusted per-ticket prices onto the ticket objects forwarded to Stripe helper.
+    const trustedByType = new Map(pricing.lines.map(l => [l.ticketTypeId, l]));
+    for (const t of tickets) {
+      const tl = trustedByType.get(Number(t.ticketTypeId));
+      if (!tl) return res.status(400).json({ error: 'Unknown ticket type' });
+      t.price = tl.unitPrice;
+      t.name = tl.name;
     }
 
     // TICKET SALE END DATE CHECK: Validate sales haven't ended
@@ -119,20 +142,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     
     console.log('✅ All capacity checks passed');
 
-    // Calculate totals
-    // Debug logging to see what values are being received
-    console.log('💰 Amount calculation:', {
-      finalTotal_received: finalTotal,
-      originalTotal_received: originalTotal,
-      tickets_sample: tickets[0] ? { price: tickets[0].price, amount: tickets[0].amount } : null
-    });
-    
-    const totalAmount = finalTotal !== undefined && finalTotal !== null 
-      ? finalTotal 
-      : tickets.reduce((sum, ticket) => sum + (ticket.price * ticket.amount), 0);
+    const totalAmount = pricing.finalTotal;
     const isFreeEvent = totalAmount === 0;
-    
-    console.log('💰 Calculated totalAmount:', totalAmount, 'isFreeEvent:', isFreeEvent);
+    console.log('💰 Trusted totals (pence):', {
+      originalTotal: pricing.originalTotal,
+      finalTotal: pricing.finalTotal,
+      discountAmount: pricing.discountAmount,
+      appliedDiscount: pricing.appliedDiscount?.code ?? null,
+      isFreeEvent
+    });
 
     if (isFreeEvent) {
       console.log('📋 Free event detected, redirecting to free registration API...');
@@ -174,17 +192,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
     
-    const originalTotalInPence = Math.round(originalTotal || 0);
-    const finalTotalInPence = Math.round(totalAmount);
-    const discountInPence = originalTotal && totalAmount ? Math.round(originalTotal - totalAmount) : 0;
+    const originalTotalInPence = pricing.originalTotal;
+    const finalTotalInPence = pricing.finalTotal;
+    const discountInPence = pricing.discountAmount;
     
-    console.log('💾 Storing order with values (in pence):', {
+    console.log('💾 Storing order with trusted values (in pence):', {
       originalTotal: originalTotalInPence,
       finalTotal: finalTotalInPence,
       discountAmount: discountInPence
     });
 
-    // Build ticket rows for creation
+    // Build ticket rows for creation — prices always from trusted DB values.
     const ticketRows: Array<{
       eventTicketTypeId: number;
       amount: number;
@@ -193,12 +211,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       firstName: string;
       lastName: string;
     }> = [];
-    for (const ticket of tickets) {
-      for (let i = 0; i < ticket.amount; i++) {
+    for (const line of pricing.lines) {
+      for (let i = 0; i < line.amount; i++) {
         ticketRows.push({
-          eventTicketTypeId: ticket.ticketTypeId,
+          eventTicketTypeId: line.ticketTypeId,
           amount: 1,
-          priceCharged: ticket.price,
+          priceCharged: line.unitPrice,
           secret: Math.random().toString(36).substr(2, 15),
           firstName: customerData?.firstName || '',
           lastName: customerData?.lastName || '',
@@ -215,6 +233,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       originalTotal: originalTotalInPence,
       finalTotal: finalTotalInPence,
       discountAmount: discountInPence,
+      discountCodeId: pricing.appliedDiscount?.id ?? null,
       customFields: customerData?.customFields ? JSON.stringify(customerData.customFields) : null,
     };
 
@@ -243,25 +262,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: 'Failed to create order from waitlist claim' });
       }
     } else {
-      // NORMAL PATH: standard order + ticket creation
-      const order = await prisma.order.create({
-        data: {
+      // NORMAL PATH: reserve capacity atomically (serializable transaction wraps the
+      // recomputed capacity check + order + ticket creation). See
+      // `src/lib/services/ticketing/reserveAtomic.ts` for the retry/idempotency logic.
+      const reservation = await reserveOrderAtomically({
+        orderData: {
           id: orderId,
           userId: user.id,
           eventDateId,
-          ...orderData,
+          paymentType: orderData.paymentType,
+          shipping: orderData.shipping,
+          locale: orderData.locale,
+          idempotencyKey: orderData.idempotencyKey,
+          cancellationSecret: orderData.cancellationSecret,
+          originalTotal: orderData.originalTotal,
+          finalTotal: orderData.finalTotal,
+          discountAmount: orderData.discountAmount,
+          discountCodeId: orderData.discountCodeId,
+          customFields: orderData.customFields,
           status: 'PENDING',
-        }
+        },
+        ticketRows,
+        items: tickets.map((t: any) => ({
+          eventTicketTypeId: Number(t.ticketTypeId),
+          quantity: Number(t.amount),
+        })),
       });
-      
-      console.log('✅ Order created with finalTotal:', order.finalTotal, 'originalTotal:', order.originalTotal);
-      
-      for (const ticket of ticketRows) {
-        await prisma.ticket.create({
-          data: {
-            orderId,
-            ...ticket,
-          }
+      if (!reservation.success) {
+        // Nothing to roll back — the transaction failed before anything was committed.
+        orderId = null;
+        return res.status(reservation.status).json({
+          error: reservation.error,
+          details: reservation.details,
         });
       }
     }
@@ -270,15 +302,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     console.log('✅ Creating Stripe checkout session...');
 
-    // Use passed totals or calculate if not provided
-    const finalTotalAmount = finalTotal !== undefined && finalTotal !== null
-      ? finalTotal 
-      : tickets.reduce((sum, ticket) => sum + (ticket.price * ticket.amount), 0);
-    const originalTotalAmount = originalTotal !== undefined && originalTotal !== null
-      ? originalTotal
-      : tickets.reduce((sum, ticket) => sum + (ticket.price * ticket.amount), 0);
+    // Use ONLY trusted server-computed totals.
+    const trustedDiscountInfo = pricing.appliedDiscount
+      ? {
+          code: pricing.appliedDiscount.code,
+          discountAmount: pricing.discountAmount,
+          discountType: pricing.appliedDiscount.discountType,
+          discountValue: pricing.appliedDiscount.discountValue,
+        }
+      : undefined;
 
-    // Create checkout session with orderId in metadata so webhook can find and update the order
     const session = await createCheckoutSession({
       tickets,
       eventDateId,
@@ -286,10 +319,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       eventDate,
       customerEmail,
       customerData,
-      orderId: orderId, // Pass orderId so webhook can update existing order instead of creating new one
-      finalTotal: finalTotalAmount,
-      originalTotal: originalTotalAmount,
-      discountInfo,
+      orderId: orderId,
+      finalTotal: pricing.finalTotal,
+      originalTotal: pricing.originalTotal,
+      discountInfo: trustedDiscountInfo,
       successUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://tickets.jvs.org.uk'}/checkout/success?session_id={CHECKOUT_SESSION_ID}&orderId=${orderId}`,
       cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://tickets.jvs.org.uk'}/checkout/cancel?orderId=${orderId}`,
     });
@@ -329,19 +362,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
     
-    // Provide more detailed error information
-    let errorMessage = 'Failed to create checkout session';
-    let errorDetails = 'Unknown error';
-    
-    if (error instanceof Error) {
-      errorMessage = error.message;
-      errorDetails = error.stack || 'No stack trace';
-    }
-    
-    return res.status(500).json({ 
-      error: errorMessage,
-      details: errorDetails,
-      timestamp: new Date().toISOString()
-    });
+    return res.status(500).json({ error: 'Failed to create checkout session' });
   }
 }

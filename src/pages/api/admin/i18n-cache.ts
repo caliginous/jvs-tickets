@@ -1,10 +1,25 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import { getCacheStats, clearTranslationCache, invalidateTranslationCache, prewarmTranslationCache } from "../../../lib/i18nCache";
+import { timingSafeEqual } from "crypto";
+
+function safeEqual(a: string | undefined | null, b: string | undefined | null): boolean {
+    if (!a || !b) return false;
+    const ab = Buffer.from(a);
+    const bb = Buffer.from(b);
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-    // Simple API key check for now
-    const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-    if (apiKey !== process.env.CRON_SECRET) {
+    // Require a dedicated secret for this admin cache endpoint so it does not share
+    // blast radius with CRON_SECRET.
+    const expected = process.env.I18N_CACHE_SECRET || process.env.CRON_SECRET;
+    if (!expected) {
+        console.error("[i18n-cache] Missing I18N_CACHE_SECRET / CRON_SECRET");
+        return res.status(500).json({ error: "Server misconfigured" });
+    }
+    const supplied = String(req.headers["x-api-key"] || req.query.apiKey || "");
+    if (!safeEqual(supplied, expected)) {
         return res.status(401).json({ error: "Unauthorized" });
     }
 
@@ -39,7 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
         } catch (error) {
             console.error("Cache operation failed:", error);
-            return res.status(500).json({ error: "Cache operation failed", details: error.message });
+            return res.status(500).json({ error: "Cache operation failed" });
         }
     }
 

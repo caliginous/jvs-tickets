@@ -153,10 +153,37 @@ async function handler(
             }, 0);
             amount = ticketTotal + getServiceFeeAmount(shippingFees, shippingType) + getServiceFeeAmount(paymentFees, orderDB.paymentType);
             
-            // Apply discount if present
-            if (discountInfo && discountInfo.discountAmount && discountInfo.discountAmount > 0) {
-                amount = Math.max(0, amount - discountInfo.discountAmount);
-                console.log(`[payment_intent/stripe] Applied discount: £${discountInfo.discountAmount}, Final amount: £${amount}`);
+            // Apply discount server-side. Never trust discountInfo.discountAmount from the
+            // client — re-validate using only the supplied code and look up the DiscountCode
+            // record from the database.
+            if (discountInfo && typeof discountInfo.code === "string" && discountInfo.code.trim()) {
+                const dc = await prisma.discountCode.findUnique({
+                    where: { code: discountInfo.code.trim().toUpperCase() }
+                });
+                const now = new Date();
+                const codeValid =
+                    dc &&
+                    dc.isActive &&
+                    now >= dc.validFrom &&
+                    (!dc.validUntil || now <= dc.validUntil) &&
+                    (!dc.usageLimit || dc.currentUsage < dc.usageLimit) &&
+                    (!dc.minimumOrderValue || amount >= dc.minimumOrderValue);
+                if (codeValid) {
+                    let computedDiscount = 0;
+                    if (dc.discountType === "percentage") {
+                        computedDiscount = Math.floor((amount * dc.discountValue) / 100);
+                        if (dc.maximumDiscount && computedDiscount > dc.maximumDiscount) {
+                            computedDiscount = dc.maximumDiscount;
+                        }
+                    } else {
+                        computedDiscount = dc.discountValue;
+                    }
+                    if (computedDiscount > amount) computedDiscount = amount;
+                    amount = Math.max(0, amount - computedDiscount);
+                    console.log(`[payment_intent/stripe] Applied server-computed discount ${dc.code}: -${computedDiscount}, Final amount: ${amount}`);
+                } else {
+                    console.warn(`[payment_intent/stripe] Rejected invalid discount code: ${discountInfo.code}`);
+                }
             }
             
             // Always use GBP currency
@@ -300,15 +327,11 @@ async function handler(
             console.error("[payment_intent/stripe] Error Details:", errorDetails);
             console.error("[payment_intent/stripe] Error Stack:", err?.stack);
 
-            // Return appropriate error response following Vercel's pattern
+            // Return minimal error to client; full details only logged server-side.
             const statusCode = err?.statusCode || 500;
-            const message = err?.message || "An error occurred with our connection to Stripe.";
-            
-            res.status(statusCode).json({ 
-                statusCode, 
-                message,
-                error: err?.type || 'StripeError',
-                details: errorDetails
+            res.status(statusCode).json({
+                statusCode,
+                message: "An error occurred processing payment."
             });
         }
     } else {

@@ -2,6 +2,8 @@ import { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import prisma from "../../../../lib/prisma";
 import { toPence } from "../../../../lib/amountUtils";
+import { serverAuthenticate } from "../../../../constants/serverUtil";
+import { PermissionSection, PermissionType } from "../../../../constants/interfaces";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
     apiVersion: "2022-08-01"
@@ -12,6 +14,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         res.setHeader("Allow", "POST");
         return res.status(405).json({ error: "Method not allowed" });
     }
+
+    const actor = await serverAuthenticate(req, res, {
+        permission: PermissionSection.Orders,
+        permissionType: PermissionType.Write
+    });
+    if (!actor) return;
 
     try {
         const { orderId, amount, reason } = req.body;
@@ -117,7 +125,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             metadata: {
                 orderId: orderId,
                 refundReason: reason || 'requested_by_customer',
-                refundedBy: 'admin'
+                refundedBy: actor.email || 'admin'
             }
         });
 

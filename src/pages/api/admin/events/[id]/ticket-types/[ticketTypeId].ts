@@ -1,8 +1,17 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
 import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ticketing/capacityWhere';
+import { serverAuthenticate } from '../../../../../../constants/serverUtil';
+import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+    const requiredType = req.method === 'GET' ? PermissionType.Read : PermissionType.Write;
+    const actor = await serverAuthenticate(req, res, {
+        permission: PermissionSection.EventTicketTypes,
+        permissionType: requiredType
+    });
+    if (!actor) return;
+
     const { id: eventId, ticketTypeId } = req.query;
     const eventIdNum = parseInt(eventId as string);
     const ticketTypeIdNum = parseInt(ticketTypeId as string);
@@ -54,10 +63,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 eventId: eventIdNum,
                 ticketTypeId: ticketTypeIdNum
             });
-            return res.status(500).json({ 
-                error: 'Failed to fetch ticket type',
-                details: error instanceof Error ? error.message : 'Unknown error'
-            });
+            return res.status(500).json({ error: 'Failed to fetch ticket type' });
         }
     }
 
@@ -77,17 +83,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             if (isNaN(priceNum) || priceNum < 0) {
                 return res.status(400).json({ 
                     error: 'Invalid price: must be a positive number' 
-                });
-            }
-
-            // Test database connection first
-            try {
-                await prisma.$connect();
-            } catch (connError) {
-                console.error('Database connection failed:', connError);
-                return res.status(500).json({ 
-                    error: 'Database connection failed',
-                    details: 'Unable to connect to database'
                 });
             }
 
@@ -138,10 +133,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 ticketTypeId: ticketTypeIdNum,
                 body: req.body
             });
-            return res.status(500).json({ 
-                error: 'Failed to update ticket type',
-                details: error instanceof Error ? error.message : 'Unknown error'
-            });
+            return res.status(500).json({ error: 'Failed to update ticket type' });
         }
     }
 
@@ -170,10 +162,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 eventId: eventIdNum,
                 ticketTypeId: ticketTypeIdNum
             });
-            return res.status(500).json({ 
-                error: 'Failed to delete ticket type',
-                details: error instanceof Error ? error.message : 'Unknown error'
-            });
+            return res.status(500).json({ error: 'Failed to delete ticket type' });
         }
     }
 

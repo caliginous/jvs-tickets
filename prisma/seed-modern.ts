@@ -46,15 +46,34 @@ export async function main() {
         "Options", "Translation"
     ];
 
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+            'seed-modern is not safe to run against production. Admin users must be ' +
+            'bootstrapped individually with a strong unique password via a CLI script.'
+        );
+    }
+
+    // Seed dev/test admin accounts. Passwords come from env so we never ship them
+    // in source or commit them to git.
+    const seedAdminPassword = process.env.SEED_ADMIN_PASSWORD;
+    const seedDevPassword = process.env.SEED_DEV_PASSWORD;
+    const seedTestPassword = process.env.SEED_TEST_PASSWORD;
+    if (!seedAdminPassword || !seedDevPassword || !seedTestPassword) {
+        throw new Error(
+            'Set SEED_ADMIN_PASSWORD, SEED_DEV_PASSWORD and SEED_TEST_PASSWORD in your ' +
+            'environment before running the seed (local .env only — never commit these).'
+        );
+    }
+
     const adminUsers = [];
     const adminUserData = [
-        { userName: 'admin', email: 'admin@jvs.org.uk', password: 'admin123' },
-        { userName: 'devuser', email: 'dev@jvs.org.uk', password: 'dev123' },
-        { userName: 'testuser', email: 'test@jvs.org.uk', password: 'test123' }
+        { userName: 'admin', email: 'admin@jvs.org.uk', password: seedAdminPassword },
+        { userName: 'devuser', email: 'dev@jvs.org.uk', password: seedDevPassword },
+        { userName: 'testuser', email: 'test@jvs.org.uk', password: seedTestPassword }
     ];
 
     for (const userData of adminUserData) {
-        const hashedPassword = await bcrypt.hash(userData.password, 10);
+        const hashedPassword = await bcrypt.hash(userData.password, 12);
         const adminUser = await prisma.adminUser.create({
             data: {
                 userName: userData.userName,

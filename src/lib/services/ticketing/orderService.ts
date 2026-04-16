@@ -5,12 +5,10 @@
  * using the new per-event ticket type system.
  */
 
-import { PrismaClient } from '@prisma/client';
+import prisma from '../../prisma';
 import { capacityConsumingStatusFilter } from './capacityWhere';
 // TODO: Import generateSecret after fixing import issues
 // import { generateSecret } from '../../constants/serverUtil';
-
-const prisma = new PrismaClient();
 
 export interface OrderItem {
   eventTicketTypeId: number;
@@ -192,23 +190,22 @@ async function calculateOrderTotals(
   items: OrderItem[],
   discountCode?: string
 ): Promise<{ totalAmount: number; discountAmount: number; finalTotal: number }> {
+  // Batch-load all ticket types in one query (was N+1: one findUnique per item).
+  const ids = Array.from(new Set(items.map((i) => i.eventTicketTypeId)));
+  const types = await prisma.eventTicketType.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, price: true },
+  });
+  const priceById = new Map(types.map((t) => [t.id, t.price]));
+
   let totalAmount = 0;
-
-  // Calculate base total from items
   for (const item of items) {
-    const ticketType = await prisma.eventTicketType.findUnique({
-      where: { id: item.eventTicketTypeId },
-      select: { price: true }
-    });
-
-    if (!ticketType) {
+    const catalogPrice = priceById.get(item.eventTicketTypeId);
+    if (catalogPrice === undefined) {
       throw new Error(`Ticket type ${item.eventTicketTypeId} not found`);
     }
-
-    const itemPrice = item.priceOverride ?? ticketType.price;
+    const itemPrice = item.priceOverride ?? catalogPrice;
     totalAmount += itemPrice * item.quantity;
-    
-
   }
 
   // Apply discount if provided

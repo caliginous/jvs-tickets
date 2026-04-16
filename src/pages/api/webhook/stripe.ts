@@ -112,142 +112,49 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
 
 
     try {
-        console.log("[webhook/stripe] Starting webhook processing...");
-        console.log("[webhook/stripe] Request headers:", Object.keys(req.headers));
-        console.log("[webhook/stripe] Content-Type:", req.headers['content-type']);
-        console.log("[webhook/stripe] Content-Length:", req.headers['content-length']);
-        
-        // Get the raw body using aggressive stream reading
         const rawBody = await getRawBody(req);
-        console.log(`[webhook/stripe] Raw body length: ${rawBody.length} bytes`);
-        
+
         const sig = req.headers["stripe-signature"];
-        console.log(`[webhook/stripe] Signature header: ${sig ? 'present' : 'missing'}`);
-        
         if (!sig) {
-            console.error("[webhook/stripe] Missing stripe-signature header");
             return res.status(400).json({ error: "Missing stripe-signature header" });
         }
-
-        // Handle case where signature might be an array
         const signature = Array.isArray(sig) ? sig[0] : sig;
         if (!signature) {
-            console.error("[webhook/stripe] Invalid stripe-signature header");
             return res.status(400).json({ error: "Invalid stripe-signature header" });
         }
 
         if (!webhookSecret) {
-            console.error("[webhook/stripe] ❌ Missing STRIPE_WEBHOOK_SECRET environment variable");
-            return res.status(500).json({ error: "Missing webhook secret" });
+            console.error("[webhook/stripe] STRIPE_WEBHOOK_SECRET is not configured");
+            return res.status(500).json({ error: "Server misconfigured" });
         }
-        
-        // Trim any whitespace/newline characters from the webhook secret
         const trimmedWebhookSecret = webhookSecret.trim();
-        
-        console.log("[webhook/stripe] Webhook secret exists:", !!webhookSecret);
-        console.log("[webhook/stripe] Webhook secret prefix:", webhookSecret.substring(0, 10) + '...');
-        console.log("[webhook/stripe] Webhook secret length:", webhookSecret.length);
-        console.log("[webhook/stripe] Webhook secret trimmed length:", trimmedWebhookSecret.length);
-        console.log("[webhook/stripe] Webhook secret ends with newline:", webhookSecret.endsWith('\n'));
-        console.log("[webhook/stripe] Webhook secret ends with space:", webhookSecret.endsWith(' '));
 
         let event: Stripe.Event;
         try {
-            console.log("[webhook/stripe] Attempting to construct Stripe event...");
-            
-            // Log the exact values being used for verification
-            console.log("[webhook/stripe] Verification details:", {
-                rawBodyLength: rawBody.length,
-                rawBodyHash: require('crypto').createHash('sha256').update(rawBody).digest('hex').substring(0, 16) + '...',
-                signature: signature,
-                webhookSecret: webhookSecret.substring(0, 10) + '...',
-                timestamp: new Date().toISOString()
-            });
-            
-            // Manual signature verification test
-            try {
-                const crypto = require('crypto');
-                const [timestamp, signatureHash] = signature.split(',');
-                const time = timestamp.split('=')[1];
-                const sig = signatureHash.split('=')[1];
-                
-                // Convert raw body to UTF-8 string for signature calculation
-                const bodyString = rawBody.toString('utf8');
-                
-                // Test different signature calculation methods using trimmed secret
-                const method1 = crypto
-                    .createHmac('sha256', trimmedWebhookSecret)
-                    .update(time + '.' + bodyString, 'utf8')
-                    .digest('hex');
-                
-                const method2 = crypto
-                    .createHmac('sha256', trimmedWebhookSecret)
-                    .update(time + '.' + bodyString)
-                    .digest('hex');
-                
-                const method3 = crypto
-                    .createHmac('sha256', trimmedWebhookSecret)
-                    .update(bodyString)
-                    .digest('hex');
-                
-                console.log("[webhook/stripe] Manual verification test:", {
-                    timestamp: time,
-                    expectedSignature: method1.substring(0, 16) + '...',
-                    receivedSignature: sig.substring(0, 16) + '...',
-                    match: method1 === sig,
-                    rawBodyPreview: bodyString.substring(0, 100) + '...',
-                    timeDotBody: (time + '.' + bodyString).substring(0, 100) + '...',
-                    bodyStringLength: bodyString.length,
-                    rawBodyLength: rawBody.length,
-                    // Test different methods
-                    method1: method1.substring(0, 16) + '...',
-                    method2: method2.substring(0, 16) + '...',
-                    method3: method3.substring(0, 16) + '...',
-                    // Debug the exact string being hashed
-                    hashInput: `"${time}.${bodyString.substring(0, 50)}..."`,
-                    webhookSecretStart: webhookSecret.substring(0, 10) + '...',
-                    webhookSecretEnd: '...' + webhookSecret.substring(webhookSecret.length - 4)
-                });
-                
-                // Try to reverse-engineer what Stripe expects
-                console.log("[webhook/stripe] Reverse engineering test:", {
-                    receivedSignature: sig,
-                    // Test if we can find a matching input by trying different variations
-                    testVariations: {
-                        withUtf8: method1,
-                        withoutUtf8: method2,
-                        bodyOnly: method3,
-                        // Try with different timestamp formats
-                        timestampAsNumber: crypto.createHmac('sha256', trimmedWebhookSecret).update(parseInt(time) + '.' + bodyString).digest('hex').substring(0, 16) + '...',
-                        // Try with different separators
-                        withDash: crypto.createHmac('sha256', trimmedWebhookSecret).update(time + '-' + bodyString).digest('hex').substring(0, 16) + '...'
-                    }
-                });
-            } catch (manualErr) {
-                console.error("[webhook/stripe] Manual verification test failed:", manualErr.message);
-            }
-            
-            // Use the raw body to construct and verify the event with trimmed secret
             event = stripe.webhooks.constructEvent(rawBody, signature, trimmedWebhookSecret);
-            
-            console.log(`[webhook/stripe] ✅ Successfully verified webhook: ${event.id}, type: ${event.type}`);
         } catch (err: any) {
-            console.error(`[webhook/stripe] ❌ Webhook signature verification failed: ${err.message}`);
-            console.error(`[webhook/stripe] Error details:`, {
-                errorType: err.constructor.name,
-                errorCode: err.code,
-                errorMessage: err.message,
-                rawBodyLength: rawBody.length,
-                rawBodyPreview: rawBody.toString('utf8').substring(0, 200) + '...',
-                signatureLength: signature.length,
-                signaturePreview: signature.substring(0, 50) + '...',
-                webhookSecretLength: webhookSecret.length,
-                requestBodyKeys: req.body ? Object.keys(req.body) : 'No body',
-                requestBodyType: typeof req.body,
-                requestBodyLength: req.body ? (Array.isArray(req.body) ? req.body.length : Object.keys(req.body).length) : 'N/A'
+            console.error("[webhook/stripe] Signature verification failed");
+            return res.status(400).json({ error: "Invalid signature" });
+        }
+
+        console.log(`[webhook/stripe] Verified event: ${event.id} (${event.type})`);
+
+        // IDEMPOTENCY: record the event id; return 200 immediately on duplicate delivery.
+        try {
+            await prisma.webhookEventLog.create({
+                data: {
+                    provider: "stripe",
+                    eventId: event.id,
+                    eventType: event.type,
+                }
             });
-            
-            return res.status(400).json({ error: `Webhook Error: ${err.message}` });
+        } catch (e: any) {
+            // P2002 — unique constraint violation = already processed.
+            if (e?.code === "P2002") {
+                console.log(`[webhook/stripe] Duplicate event ${event.id}; returning 200`);
+                return res.status(200).json({ duplicate: true });
+            }
+            console.warn("[webhook/stripe] Idempotency log insert failed, continuing:", e?.message);
         }
 
         // Extract orderId from metadata for various event types
@@ -928,8 +835,17 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
             console.warn(`[webhook/stripe] No orderId found for event ${event.type}`);
         }
 
-        // Return a 200 response to acknowledge receipt of the event
-        console.log(`[webhook/stripe] ✅ Webhook processing completed successfully`);
+        // Mark the event as processed (idempotency).
+        try {
+            await prisma.webhookEventLog.updateMany({
+                where: { provider: "stripe", eventId: event.id },
+                data: { processedAt: new Date() },
+            });
+        } catch (e) {
+            console.warn("[webhook/stripe] failed to mark event processed:", (e as any)?.message);
+        }
+
+        console.log(`[webhook/stripe] Webhook processing completed successfully`);
         res.status(200).json({ received: true });
     } catch (error: any) {
         // Log the detailed error for debugging

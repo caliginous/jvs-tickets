@@ -3,6 +3,7 @@ import prisma from '../../../lib/prisma';
 import { send } from '../../../lib/send';
 import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
 import { validateClaimSession } from '../../../lib/services/waitlist/claimSessionValidator';
+import { computeOrderTotals, PricingError } from '../../../lib/services/pricing/computeOrderTotals';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'POST') {
@@ -28,15 +29,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(400).json({ error: 'Customer data incomplete' });
         }
 
-        // Verify this is indeed a free event
-        const totalAmount = tickets.reduce((sum, ticket) => sum + (ticket.price * ticket.amount), 0);
-        if (totalAmount !== 0) {
-            return res.status(400).json({ error: 'This endpoint is only for free events' });
+        const eventDateIdParsed = parseInt(eventDateId);
+
+        // TRUSTED FREE-EVENT CHECK: recompute totals from DB prices. Reject if any price > 0
+        // in the catalog, regardless of what the client sent.
+        try {
+            const pricing = await computeOrderTotals({
+                eventDateId: eventDateIdParsed,
+                tickets: tickets.map((t: any) => ({
+                    ticketTypeId: t.ticketTypeId || t.eventTicketTypeId,
+                    amount: t.amount
+                }))
+            });
+            if (pricing.originalTotal !== 0) {
+                console.error('❌ free-event endpoint called for paid event', {
+                    eventDateId: eventDateIdParsed,
+                    originalTotal: pricing.originalTotal
+                });
+                return res.status(400).json({ error: 'This endpoint is only for free events' });
+            }
+        } catch (e) {
+            if (e instanceof PricingError) {
+                return res.status(e.status).json({ error: e.message });
+            }
+            throw e;
         }
 
         console.log('✅ Free event validation passed');
-
-        const eventDateIdParsed = parseInt(eventDateId);
 
         // TICKET SALE END DATE CHECK: Validate sales haven't ended
         console.log('🕐 Checking ticket sale end date...');
@@ -368,9 +387,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     } catch (error) {
         console.error('❌ Error processing free event registration:', error);
-        return res.status(500).json({ 
-            error: 'Failed to process registration',
-            details: error.message 
-        });
+        return res.status(500).json({ error: 'Failed to process registration' });
     }
 }

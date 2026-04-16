@@ -6,8 +6,10 @@ import { PersonalInformationState } from "../../../store/reducers/personalInform
 import { PaymentType } from "../../../store/factories/payment/PaymentFactory";
 import prisma from "../../../lib/prisma";
 import { validateTickets } from "../../../lib/validators/orderValidator";
+import { computeOrderTotals, PricingError } from "../../../lib/services/pricing/computeOrderTotals";
 
-// CRITICAL: Normalize request body to accept both shapes (top-level and nested under order)
+// CRITICAL: Normalize request body to accept both shapes (top-level and nested under order).
+// NOTE: `skipValidation` is NOT accepted from the client — only the server may set it.
 function normalizeBody(raw: any) {
   const tickets = Array.isArray(raw?.tickets)
     ? raw.tickets
@@ -16,7 +18,6 @@ function normalizeBody(raw: any) {
     : [];
 
   const reservationId = raw?.reservationId ?? raw?.order?.reservationId;
-  const skipValidation = raw?.skipValidation ?? false;
 
   return {
     order: raw?.order ?? {},
@@ -27,7 +28,6 @@ function normalizeBody(raw: any) {
     discountCode: raw?.discountCode ?? null,
     tickets,
     reservationId,
-    skipValidation,
   };
 }
 
@@ -53,9 +53,11 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     locale,
     discountCode,
     tickets,
-    reservationId,
-    skipValidation
+    reservationId
   } = normalizedBody;
+  // Validation is always required on this public endpoint. The Stripe server-side path
+  // bypasses it inside trusted code elsewhere (`create-checkout-session`), not here.
+  const skipValidation = false;
 
   // CRITICAL: Validate all required fields
   const requiredFields = { order, user, eventDateId, paymentType, locale, reservationId, tickets };
@@ -239,22 +241,44 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       }
     }
 
+    // TRUSTED TOTALS: compute from DB. Never trust client-sent totals.
+    let serverTotals: { originalTotal: number; finalTotal: number; discountAmount: number; discountCodeId: string | null };
+    try {
+      const pricing = await computeOrderTotals({
+        eventDateId,
+        tickets: validTickets.map((t: any) => ({
+          ticketTypeId: t.eventTicketTypeId,
+          amount: t.amount
+        })),
+        discountCode: discountCode ?? null
+      });
+      serverTotals = {
+        originalTotal: pricing.originalTotal,
+        finalTotal: pricing.finalTotal,
+        discountAmount: pricing.discountAmount,
+        discountCodeId: pricing.appliedDiscount?.id ?? null
+      };
+    } catch (e) {
+      if (e instanceof PricingError) {
+        return res.status(e.status).json({ error: e.message });
+      }
+      throw e;
+    }
+
     // Create the order in the database with proper user connection
-    const orderData = {
+    const orderData: any = {
       eventDateId: eventDateId,
-      userId: dbUser.id, // Now we have a valid user ID
+      userId: dbUser.id,
       paymentType: paymentType,
       locale: locale,
       shipping: JSON.stringify(order.shipping || {}),
       idempotencyKey: `order-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
       cancellationSecret: Math.random().toString(36).substring(2, 15),
-      // Store payment details for admin panel
-      paymentIntent: order.paymentIntent || null,
-      paymentResult: order.paymentResult || null,
-      // Store order totals for refund processing
-      finalTotal: order.finalTotal || null,
-      originalTotal: order.originalTotal || null,
-      // Store custom fields on the order (not just on user) for order-specific responses
+      // paymentIntent/paymentResult are set only by the Stripe webhook / trusted flow, not here.
+      finalTotal: serverTotals.finalTotal,
+      originalTotal: serverTotals.originalTotal,
+      discountAmount: serverTotals.discountAmount,
+      discountCodeId: serverTotals.discountCodeId,
       customFields: user.customFields ? JSON.stringify(user.customFields) : null,
     };
 
@@ -317,9 +341,6 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
     }
     
-    return res.status(500).json({
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error occurred'
-    });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }

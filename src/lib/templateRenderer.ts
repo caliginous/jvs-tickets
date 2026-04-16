@@ -35,37 +35,60 @@ export interface TemplateData {
 }
 
 /**
- * Renders an email template by replacing {{}} placeholders with actual data
+ * HTML-escape a token value before inserting it into an email template to prevent
+ * HTML/script injection via customer-supplied values (event titles, custom fields,
+ * etc.) ending up inside the email body.
+ */
+function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+/**
+ * Renders an email template by replacing {{}} placeholders with actual data.
+ * All replacements are HTML-escaped. Tokens ending in `_raw` (e.g. `{{body_raw}}`)
+ * are emitted without escaping; only set those from trusted server-side sources.
  */
 export async function renderEmailTemplate(template: string, payload: any): Promise<string> {
-    // Get configurable common email values
     const commonEmailData = await getEmailCommonData();
-    
+
+    const commonValues: Record<string, string> = payload.common
+        ? {
+              greeting: payload.common.greeting || "Hello",
+              appName: payload.common.appName || commonEmailData.appName,
+              supportEmail: payload.common.supportEmail || commonEmailData.supportEmail,
+              baseUrl: payload.common.baseUrl || commonEmailData.appUrl,
+              appUrl: payload.common.appUrl || commonEmailData.appUrl,
+          }
+        : {
+              greeting: "Hello",
+              appName: commonEmailData.appName,
+              supportEmail: commonEmailData.supportEmail,
+              baseUrl: commonEmailData.appUrl,
+              appUrl: commonEmailData.appUrl,
+          };
+
     let result = template;
-    
-    // Replace common variables
-    if (payload.common) {
-        result = result.replace(/\{\{common\.greeting\}\}/g, payload.common.greeting || "Hello");
-        result = result.replace(/\{\{common\.appName\}\}/g, payload.common.appName || commonEmailData.appName);
-        result = result.replace(/\{\{common\.supportEmail\}\}/g, payload.common.supportEmail || commonEmailData.supportEmail);
-        result = result.replace(/\{\{common\.baseUrl\}\}/g, payload.common.baseUrl || commonEmailData.appUrl);
-        result = result.replace(/\{\{common\.appUrl\}\}/g, payload.common.appUrl || commonEmailData.appUrl);
-    } else {
-        // Fallback to configurable values if no common payload
-        result = result.replace(/\{\{common\.greeting\}\}/g, "Hello");
-        result = result.replace(/\{\{common\.appName\}\}/g, commonEmailData.appName);
-        result = result.replace(/\{\{common\.supportEmail\}\}/g, commonEmailData.supportEmail);
-        result = result.replace(/\{\{common\.baseUrl\}\}/g, commonEmailData.appUrl);
-        result = result.replace(/\{\{common\.appUrl\}\}/g, commonEmailData.appUrl);
+    for (const [key, val] of Object.entries(commonValues)) {
+        const re = new RegExp(`\\{\\{common\\.${key}\\}\\}`, "g");
+        result = result.replace(re, escapeHtml(val));
     }
-  
-  // Replace all {{}} placeholders
-  result = result.replace(/\{\{([^}]+)\}\}/g, (match, path) => {
-    const value = getNestedValue(payload, path.trim());
-    return value !== undefined ? String(value) : match;
-  });
-  
-  return result;
+
+    // Replace all {{}} placeholders. `_raw` suffix opts out of escaping.
+    result = result.replace(/\{\{([^}]+)\}\}/g, (match, rawPath) => {
+        const path = String(rawPath).trim();
+        const raw = path.endsWith("_raw");
+        const lookupPath = raw ? path.slice(0, -"_raw".length) : path;
+        const value = getNestedValue(payload, lookupPath);
+        if (value === undefined) return match;
+        return raw ? String(value) : escapeHtml(value);
+    });
+
+    return result;
 }
 
 /**

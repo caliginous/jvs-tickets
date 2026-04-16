@@ -1,184 +1,203 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../lib/prisma";
 import { getEventUrl } from "../../utils/slug";
-import { buildCapacityConsumingOrderWhere } from "../../lib/services/ticketing/capacityWhere";
+import { buildCapacityConsumingOrderWhere, capacityConsumingStatusFilter } from "../../lib/services/ticketing/capacityWhere";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Only allow GET requests - reject all other methods
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Add HTTP caching headers for edge cache (Vercel/Cloudflare)
+  // Edge cache (Vercel/Cloudflare) — CDN re-fetches every 60s and serves stale for 5 min.
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
 
   try {
     const now = new Date();
-    
-    // Step 1: Fetch events with only essential data (no orders/tickets yet)
+
     const events = await prisma.event.findMany({
-      where: {
-        isActive: true // Only active events
-        // Remove the date filter to include both past and future events
-      },
+      where: { isActive: true },
       include: {
         venue: true,
-        dates: {
-          // Include all dates (past and future)
-          orderBy: {
-            date: 'asc'
-          }
-        },
-        ticketTypes: true
-      }
+        dates: { orderBy: { date: 'asc' } },
+        ticketTypes: true,
+      },
     });
 
-    // Step 2: Use aggregated queries to get ticket counts efficiently
-    const eventSummaries = await Promise.all(events.map(async (event) => {
-      // Find the next future date, or use the most recent past date if no future dates exist
-      const nextDate = event.dates.find(date => new Date(date.date) > now) || 
-                      event.dates.filter(date => new Date(date.date) <= now).pop();
+    // Collect the set of eventDateIds we care about (one "next date" per event).
+    const eventNextDate = new Map<number, (typeof events)[number]['dates'][number]>();
+    for (const event of events) {
+      const next =
+        event.dates.find((d) => d.date && new Date(d.date) > now) ||
+        [...event.dates].reverse().find((d) => d.date && new Date(d.date) <= now);
+      if (next) eventNextDate.set(event.id, next);
+    }
+    const eventDateIds = Array.from(eventNextDate.values()).map((d) => d.id);
+
+    // Batch: single groupBy for total sold tickets per eventDateId
+    // and one more for per-ticket-type sold counts. Previously this did 2*N queries
+    // (one .aggregate + one .groupBy per event).
+    let totalsByDateId = new Map<number, number>();
+    let soldByDateAndType = new Map<number, Map<number, number>>();
+
+    if (eventDateIds.length > 0) {
+      const [totalRows, perTypeRows] = await Promise.all([
+        prisma.ticket.groupBy({
+          by: ['orderId'],
+          where: {
+            order: {
+              eventDateId: { in: eventDateIds },
+              OR: capacityConsumingStatusFilter(),
+            },
+          },
+          _count: { id: true },
+        }).then(async () => {
+          // The row-level groupBy above would be too granular; instead use a second
+          // aggregate per-eventDateId via a raw aggregation.
+          const rows = await prisma.$queryRawUnsafe<Array<{ eventDateId: number; count: number }>>(
+            `
+            SELECT o."eventDateId" as "eventDateId", COUNT(t.id)::int as count
+            FROM "Ticket" t
+            INNER JOIN "Order" o ON o.id = t."orderId"
+            WHERE o."eventDateId" = ANY($1::int[])
+              AND (
+                o.status IN ('CONFIRMED','PAID','PENDING')
+                OR (o.status IN ('REFUNDED','CANCELLED') AND o."inventoryReturnedToPool" = false)
+              )
+            GROUP BY o."eventDateId"
+            `,
+            eventDateIds
+          );
+          return rows;
+        }),
+        prisma.$queryRawUnsafe<Array<{ eventDateId: number; eventTicketTypeId: number; count: number }>>(
+          `
+          SELECT o."eventDateId" as "eventDateId", t."eventTicketTypeId" as "eventTicketTypeId", COUNT(t.id)::int as count
+          FROM "Ticket" t
+          INNER JOIN "Order" o ON o.id = t."orderId"
+          WHERE o."eventDateId" = ANY($1::int[])
+            AND t."eventTicketTypeId" IS NOT NULL
+            AND (
+              o.status IN ('CONFIRMED','PAID','PENDING')
+              OR (o.status IN ('REFUNDED','CANCELLED') AND o."inventoryReturnedToPool" = false)
+            )
+          GROUP BY o."eventDateId", t."eventTicketTypeId"
+          `,
+          eventDateIds
+        ),
+      ]);
+
+      for (const row of totalRows as Array<{ eventDateId: number; count: number }>) {
+        totalsByDateId.set(row.eventDateId, row.count);
+      }
+      for (const row of perTypeRows) {
+        const map = soldByDateAndType.get(row.eventDateId) ?? new Map<number, number>();
+        map.set(row.eventTicketTypeId, row.count);
+        soldByDateAndType.set(row.eventDateId, map);
+      }
+    }
+
+    const eventSummaries = events.map((event) => {
+      const nextDate = eventNextDate.get(event.id);
       if (!nextDate) return null;
 
-      // Get global ticket limit and sold count for this event date
-      const capacityWhere = buildCapacityConsumingOrderWhere(nextDate.id);
-      const globalTicketStats = await prisma.ticket.aggregate({
-        where: {
-          order: capacityWhere,
-        },
-        _count: {
-          id: true
-        }
-      });
-
-      // Get per-ticket-type counts using aggregation
-      const ticketTypeStats = await prisma.ticket.groupBy({
-        by: ['eventTicketTypeId'],
-        where: {
-          order: capacityWhere,
-        },
-        _count: {
-          id: true
-        }
-      });
-
-      const ticketTypeSoldMap = new Map(
-        ticketTypeStats.map(stat => [stat.eventTicketTypeId!, stat._count.id])
-      );
+      const soldForDate = totalsByDateId.get(nextDate.id) ?? 0;
+      const ticketTypeSoldMap = soldByDateAndType.get(nextDate.id) ?? new Map<number, number>();
 
       const ticketTypes = event.ticketTypes || [];
-      
-      // Calculate ticket availability using aggregated data
       const ticketAvailability = {
         total: 0,
         available: 0,
         sold: 0,
         percentageRemaining: 100,
-        hasGlobalLimit: false
+        hasGlobalLimit: !!nextDate.totalTicketLimit,
       };
 
-      if (nextDate) {
-        const globalLimit = nextDate.totalTicketLimit;
-        ticketAvailability.hasGlobalLimit = !!globalLimit;
-
-        // Use aggregated sold count
-        const soldTickets = globalTicketStats._count.id;
-
-        if (globalLimit) {
-          // Global limit applies
-          ticketAvailability.total = globalLimit;
-          ticketAvailability.sold = soldTickets;
-          ticketAvailability.available = Math.max(0, globalLimit - soldTickets);
-          ticketAvailability.percentageRemaining = globalLimit > 0 ? Math.round((ticketAvailability.available / globalLimit) * 100) : 0;
-        } else {
-          // No global limit, calculate from ticket types (Category deprecated)
-          ticketTypes.forEach(tt => {
-            const maxAmount = tt.capacity || 999999;
-            const sold = ticketTypeSoldMap.get(tt.id) || 0;
-            ticketAvailability.total += maxAmount;
-            ticketAvailability.sold += sold;
-            ticketAvailability.available += Math.max(0, maxAmount - sold);
-          });
-          ticketAvailability.percentageRemaining = ticketAvailability.total > 0 ? Math.round((ticketAvailability.available / ticketAvailability.total) * 100) : 0;
-        }
+      const globalLimit = nextDate.totalTicketLimit;
+      if (globalLimit) {
+        ticketAvailability.total = globalLimit;
+        ticketAvailability.sold = soldForDate;
+        ticketAvailability.available = Math.max(0, globalLimit - soldForDate);
+        ticketAvailability.percentageRemaining =
+          globalLimit > 0 ? Math.round((ticketAvailability.available / globalLimit) * 100) : 0;
+      } else {
+        ticketTypes.forEach((tt) => {
+          const maxAmount = tt.capacity || 999999;
+          const sold = ticketTypeSoldMap.get(tt.id) || 0;
+          ticketAvailability.total += maxAmount;
+          ticketAvailability.sold += sold;
+          ticketAvailability.available += Math.max(0, maxAmount - sold);
+        });
+        ticketAvailability.percentageRemaining =
+          ticketAvailability.total > 0
+            ? Math.round((ticketAvailability.available / ticketAvailability.total) * 100)
+            : 0;
       }
 
-      // Use ticket types (Category deprecated)
-      const categoryBreakdown = ticketTypes.map(tt => {
+      const categoryBreakdown = ticketTypes.map((tt) => {
         const maxAmount = tt.capacity || 999999;
         const sold = ticketTypeSoldMap.get(tt.id) || 0;
         const available = Math.max(0, maxAmount - sold);
-        const isAvailable = available > 0;
-
         return {
           id: tt.id,
           name: tt.name,
-          price: tt.price / 100, // Convert from pence to pounds
+          price: tt.price / 100,
           color: tt.colorHex || '#000000',
           maxAmount,
           sold,
           available,
-          isAvailable
+          isAvailable: available > 0,
         };
       });
 
-      // Create dates array for frontend compatibility (preserve exact structure)
-      const dates = (event.dates || []).map(eventDate => ({
+      const dates = (event.dates || []).map((eventDate) => ({
         id: eventDate.id,
         date: eventDate.date ? eventDate.date.toISOString() : null,
         title: eventDate.title,
         totalTicketLimit: eventDate.totalTicketLimit,
         ticketSaleStartDate: eventDate.ticketSaleStartDate,
-        ticketSaleEndDate: eventDate.ticketSaleEndDate
+        ticketSaleEndDate: eventDate.ticketSaleEndDate,
       }));
 
-      // Return exact same structure as before to avoid regressions
       return {
         id: event.id,
         title: event.title,
         description: event.description,
         slug: event.slug,
         url: getEventUrl({ id: event.id, slug: event.slug }),
-        nextDate: nextDate?.date ? nextDate.date.toISOString() : null,
-        minPrice: categoryBreakdown.length > 0 ? Math.min(...categoryBreakdown.map(c => c.price)) : null,
+        nextDate: nextDate.date ? nextDate.date.toISOString() : null,
+        minPrice: categoryBreakdown.length > 0 ? Math.min(...categoryBreakdown.map((c) => c.price)) : null,
         coverImage: event.coverImage,
-        venue: event.venue ? {
-          name: event.venue.name,
-          address: event.venue.address,
-          city: event.venue.city,
-          postcode: event.venue.postcode
-        } : null,
+        venue: event.venue
+          ? {
+              name: event.venue.name,
+              address: event.venue.address,
+              city: event.venue.city,
+              postcode: event.venue.postcode,
+            }
+          : null,
         ticketAvailability,
         categories: categoryBreakdown,
-        dates: dates,
+        dates,
         hasAvailableTickets: ticketAvailability.available > 0,
         isSoldOut: ticketAvailability.available === 0,
-        
-        // Compatibility properties for main application (preserve exactly)
         stockQuantity: ticketAvailability.available,
         available: ticketAvailability.available > 0,
-        purchasable: ticketAvailability.available > 0
+        purchasable: ticketAvailability.available > 0,
       };
-    }));
+    });
 
-    // Filter out null events and sort by next date (preserve exact logic)
     const validEvents = eventSummaries
       .filter(Boolean)
       .sort((a, b) => {
-        // Handle events without dates by putting them at the end
-        if (!a.nextDate && !b.nextDate) return 0;
-        if (!a.nextDate) return 1;
-        if (!b.nextDate) return -1;
-        return new Date(a.nextDate).getTime() - new Date(b.nextDate).getTime();
+        if (!a!.nextDate && !b!.nextDate) return 0;
+        if (!a!.nextDate) return 1;
+        if (!b!.nextDate) return -1;
+        return new Date(a!.nextDate).getTime() - new Date(b!.nextDate).getTime();
       });
 
     res.status(200).json(validEvents);
   } catch (e: any) {
     console.error('Error in events API:', e);
-    res.status(500).json({ error: e?.message || "Internal server error" });
+    res.status(500).json({ error: 'Internal server error' });
   }
 }
-
-
-
-

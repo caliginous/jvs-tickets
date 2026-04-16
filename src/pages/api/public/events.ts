@@ -2,26 +2,50 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../lib/prisma';
 import { computeAvailability, EventAvailability } from '../../../lib/services/ticketing/availability';
 
-// CORS headers for cross-origin requests
-const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://jvs-vercel.vercel.app',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+/**
+ * Env-driven allowlist so we can add preview / production origins without code
+ * changes. Default allowlist covers production marketing domains. Browser clients
+ * that are not in the allowlist simply won't get CORS headers (server-to-server
+ * calls from Next.js are unaffected by CORS).
+ */
+const DEFAULT_ALLOWED = [
+  'https://jvs.org.uk',
+  'https://www.jvs.org.uk',
+  'https://jvs-vercel.vercel.app',
+];
+
+function getAllowedOrigins(): string[] {
+  const env = (process.env.PUBLIC_EVENTS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return Array.from(new Set([...DEFAULT_ALLOWED, ...env]));
+}
+
+function setCorsHeaders(req: NextApiRequest, res: NextApiResponse) {
+  const origin = (req.headers.origin as string) || '';
+  const allowed = getAllowedOrigins();
+  if (allowed.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Handle CORS preflight request
+  setCorsHeaders(req, res);
+
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
-    res.setHeader('Access-Control-Allow-Methods', corsHeaders['Access-Control-Allow-Methods']);
-    res.setHeader('Access-Control-Allow-Headers', corsHeaders['Access-Control-Allow-Headers']);
-    return res.status(200).end();
+    return res.status(204).end();
   }
 
-  // Only allow GET requests
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Edge cache: refresh every 60s, serve stale for 5 min.
+  res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
 
   try {
     const now = new Date();
@@ -126,21 +150,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
     );
 
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
-    res.setHeader('Access-Control-Allow-Methods', corsHeaders['Access-Control-Allow-Methods']);
-    res.setHeader('Access-Control-Allow-Headers', corsHeaders['Access-Control-Allow-Headers']);
-    
     return res.status(200).json(transformedEvents);
-    
   } catch (error) {
     console.error('Error fetching public events:', error);
-    
-    // Set CORS headers for error response
-    res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
-    res.setHeader('Access-Control-Allow-Methods', corsHeaders['Access-Control-Allow-Methods']);
-    res.setHeader('Access-Control-Allow-Headers', corsHeaders['Access-Control-Allow-Headers']);
-    
     return res.status(500).json({ error: 'Failed to fetch events' });
   }
 }

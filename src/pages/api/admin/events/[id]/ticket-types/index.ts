@@ -1,8 +1,17 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
 import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ticketing/capacityWhere';
+import { serverAuthenticate } from '../../../../../../constants/serverUtil';
+import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+    const requiredType = req.method === 'GET' ? PermissionType.Read : PermissionType.Write;
+    const actor = await serverAuthenticate(req, res, {
+        permission: PermissionSection.EventTicketTypes,
+        permissionType: requiredType
+    });
+    if (!actor) return;
+
     if (req.method === 'GET') {
         try {
             const { id: eventId } = req.query;

@@ -1,12 +1,16 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import { serverAuthenticate } from "../../../../../constants/serverUtil";
+import { PermissionSection, PermissionType } from "../../../../../constants/interfaces";
 import prisma from "../../../../../lib/prisma";
 
 export default async function handler(
     req: NextApiRequest,
     res: NextApiResponse
 ) {
-    const user = await serverAuthenticate(req, res);
+    const user = await serverAuthenticate(req, res, {
+        permission: PermissionSection.UserManagement,
+        permissionType: PermissionType.Write
+    });
     if (!user) return;
     const { id } = req.query;
     const apiKey = await prisma.adminApiKeys.findUnique({
@@ -18,8 +22,8 @@ export default async function handler(
         }
     });
 
-    if (user.email !== apiKey.user.email) {
-        res.status(400).end("Can not manipulate api keys of other users!");
+    if (!apiKey || user.email !== apiKey.user.email) {
+        res.status(404).end("API key not found");
         return;
     }
 
