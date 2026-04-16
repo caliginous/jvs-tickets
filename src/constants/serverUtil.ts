@@ -352,25 +352,37 @@ export async function requestMainSiteEventRevalidation(payload: {
         return;
     }
     try {
-        const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                secret,
-                action: payload.action,
-                eventId: payload.eventId,
-                ...(payload.slug ? { slug: payload.slug } : {}),
-            }),
-        });
-        const text = await response.text();
-        if (!response.ok) {
-            logger.error(
-                `Main site revalidation failed: ${response.status} ${text.slice(0, 500)}`
-            );
-        } else {
-            logger.revalidate(
-                `Main site revalidation OK (${payload.action} event ${payload.eventId})`
-            );
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    // JVS side accepts the secret via Authorization: Bearer or
+                    // X-Revalidate-Secret header; query-string / body secrets
+                    // are rejected to avoid leaking into logs.
+                    Authorization: `Bearer ${secret}`,
+                },
+                body: JSON.stringify({
+                    action: payload.action,
+                    eventId: payload.eventId,
+                    ...(payload.slug ? { slug: payload.slug } : {}),
+                }),
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                const text = await response.text().catch(() => "");
+                logger.error(
+                    `Main site revalidation failed: ${response.status} ${text.slice(0, 200)}`
+                );
+            } else {
+                logger.revalidate(
+                    `Main site revalidation OK (${payload.action} event ${payload.eventId})`
+                );
+            }
+        } finally {
+            clearTimeout(timer);
         }
     } catch (e) {
         logger.error("Main site revalidation request error:", e);

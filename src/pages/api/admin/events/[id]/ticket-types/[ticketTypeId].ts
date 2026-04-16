@@ -1,8 +1,24 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
 import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ticketing/capacityWhere';
-import { serverAuthenticate } from '../../../../../../constants/serverUtil';
+import { serverAuthenticate, requestMainSiteEventRevalidation } from '../../../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
+
+async function nudgeMainSite(eventId: number) {
+    try {
+        const parent = await prisma.event.findUnique({
+            where: { id: eventId },
+            select: { slug: true },
+        });
+        requestMainSiteEventRevalidation({
+            action: 'event_updated',
+            eventId,
+            slug: parent?.slug ?? null,
+        }).catch(() => {});
+    } catch {
+        /* never let revalidation errors block the admin response */
+    }
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     const requiredType = req.method === 'GET' ? PermissionType.Read : PermissionType.Write;
@@ -124,6 +140,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 }
             });
 
+            await nudgeMainSite(eventIdNum);
             return res.status(200).json({ ...updatedTicketType, sold: soldCountAfterUpdate });
         } catch (error) {
             console.error('Error updating ticket type:', {
@@ -154,6 +171,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 where: { id: ticketTypeIdNum }
             });
 
+            await nudgeMainSite(eventIdNum);
             return res.status(204).end();
         } catch (error) {
             console.error('Error deleting ticket type:', {

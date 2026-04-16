@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import prisma from '../../../../../../lib/prisma';
 import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ticketing/capacityWhere';
-import { serverAuthenticate } from '../../../../../../constants/serverUtil';
+import { serverAuthenticate, requestMainSiteEventRevalidation } from '../../../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -96,7 +96,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 }
             });
 
-            // Return with sold: 0 (new ticket type has no sales)
+            // Ticket-type changes affect the JVS events listing (price range,
+            // availability) so nudge the marketing site to revalidate.
+            const parentEvent = await prisma.event.findUnique({
+                where: { id: eventIdNum },
+                select: { slug: true },
+            });
+            requestMainSiteEventRevalidation({
+                action: "event_updated",
+                eventId: eventIdNum,
+                slug: parentEvent?.slug ?? null,
+            }).catch(() => {});
+
             return res.status(201).json({ ...newTicketType, sold: 0 });
         } catch (error) {
             console.error('Error creating ticket type:', error);

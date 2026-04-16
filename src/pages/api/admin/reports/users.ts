@@ -55,24 +55,52 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
         }
 
-        // Fetch all users with their orders
+        // Pagination. Admin UI can pass ?limit=&offset=; default is reasonable but
+        // bounded so we never accidentally load every user+order+ticket into memory.
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "200"), 10) || 200, 1), 500);
+        const offset = Math.max(parseInt(String(req.query.offset ?? "0"), 10) || 0, 0);
+
+        // SQL-prune: only return users that have at least one matching order in range.
+        // Per-user we cap the included orders at the 20 most recent — the report UI
+        // shows aggregates + a recent list. Full history remains available via the
+        // order admin endpoints. Ticket aggregate counts are still accurate because
+        // we use per-order `_sum` rather than counting inlined ticket rows.
         const users = await prisma.user.findMany({
-            include: {
+            where: { orders: { some: ordersWhere } },
+            orderBy: { id: 'asc' },
+            take: limit,
+            skip: offset,
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+                address: true,
+                city: true,
+                zip: true,
+                countryCode: true,
                 orders: {
                     where: ordersWhere,
-                    include: {
+                    orderBy: { date: 'desc' },
+                    take: 20,
+                    select: {
+                        id: true,
+                        date: true,
+                        status: true,
+                        finalTotal: true,
+                        originalTotal: true,
                         eventDate: {
-                            include: {
-                                event: true
-                            }
+                            select: {
+                                eventId: true,
+                                date: true,
+                                event: { select: { title: true } },
+                            },
                         },
-                        tickets: true
+                        tickets: { select: { amount: true } },
                     },
-                    orderBy: {
-                        date: 'desc'
-                    }
-                }
-            }
+                },
+            },
         });
 
         // Transform and calculate analytics for each user
@@ -205,13 +233,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     } catch (error) {
         console.error('Error fetching user analytics:', error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({ 
-            message: 'Internal server error',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+        res.status(500).json({ message: 'Internal server error' });
     }
 }
