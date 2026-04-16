@@ -3,7 +3,7 @@ import { createCheckoutSession } from '../../../lib/stripe';
 import prisma from '../../../lib/prisma';
 import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
 import { validateClaimSession, createOrderWithWaitlistFulfilment } from '../../../lib/services/waitlist/claimSessionValidator';
-import { computeOrderTotals, PricingError } from '../../../lib/services/pricing/computeOrderTotals';
+import { computeOrderTotals, PricingError, type TrustedTicketLine } from '../../../lib/services/pricing/computeOrderTotals';
 import { reserveOrderAtomically } from '../../../lib/services/ticketing/reserveAtomic';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -64,7 +64,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // Reassign trusted per-ticket prices onto the ticket objects forwarded to Stripe helper.
-    const trustedByType = new Map(pricing.lines.map(l => [l.ticketTypeId, l]));
+    const trustedByType = new Map<number, TrustedTicketLine>(
+      pricing.lines.map(l => [l.ticketTypeId, l])
+    );
     for (const t of tickets) {
       const tl = trustedByType.get(Number(t.ticketTypeId));
       if (!tl) return res.status(400).json({ error: 'Unknown ticket type' });
@@ -288,12 +290,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           quantity: Number(t.amount),
         })),
       });
-      if (!reservation.success) {
+      if (reservation.success !== true) {
         // Nothing to roll back — the transaction failed before anything was committed.
+        const failure = reservation as {
+          success: false;
+          status: number;
+          error: string;
+          details?: Record<number, number>;
+        };
         orderId = null;
-        return res.status(reservation.status).json({
-          error: reservation.error,
-          details: reservation.details,
+        return res.status(failure.status).json({
+          error: failure.error,
+          details: failure.details,
         });
       }
     }

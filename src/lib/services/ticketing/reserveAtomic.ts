@@ -60,12 +60,17 @@ export async function reserveOrderAtomically(params: {
                         orderData.eventDateId,
                         items
                     );
-                    if (!capacity.success) {
+                    if (capacity.success !== true) {
+                        const failure = capacity as {
+                            success: false;
+                            error: string;
+                            details?: Record<number, number>;
+                        };
                         return {
                             ok: false as const,
                             status: 409,
-                            error: capacity.error,
-                            details: (capacity as any).details,
+                            error: failure.error,
+                            details: failure.details,
                         };
                     }
 

@@ -5,6 +5,7 @@
  * using the new per-event ticket type system.
  */
 
+import type { PrismaClient } from '@prisma/client';
 import prisma from '../../prisma';
 import { capacityConsumingStatusFilter } from './capacityWhere';
 // TODO: Import generateSecret after fixing import issues
