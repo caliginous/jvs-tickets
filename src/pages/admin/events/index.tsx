@@ -1,7 +1,8 @@
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 import { AdminLayout } from "../../../components/admin/layout";
 import { getAdminServerSideProps } from "../../../constants/serverUtil";
-import { PencilIcon, PlusIcon, RefreshIcon } from "@heroicons/react/solid";
+import { ClipboardListIcon, PencilIcon, PlusIcon, RefreshIcon } from "@heroicons/react/solid";
 import prisma from "../../../lib/prisma";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
@@ -190,6 +191,7 @@ export default function Events({
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket Amount</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waitlist</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Edit</th>
                             </tr>
                         </thead>
@@ -231,6 +233,14 @@ export default function Events({
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                             {event.ticketsBought}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <Link href={`/admin/events/${event.id}/waitlist`}>
+                                                <span className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer">
+                                                    <ClipboardListIcon className="w-4 h-4 shrink-0" />
+                                                    Waitlist
+                                                </span>
+                                            </Link>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <button

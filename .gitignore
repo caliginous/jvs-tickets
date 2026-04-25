@@ -51,3 +51,4 @@ yarn-error.log*
 test-smtp-credentials.js
 STRIPE_SETUP.md
 .env*.local
+.vercel

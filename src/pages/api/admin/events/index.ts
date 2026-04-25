@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import {
     revalidateBuild,
+    requestMainSiteEventRevalidation,
     serverAuthenticate
 } from "../../../../constants/serverUtil";
 import prisma from "../../../../lib/prisma";
@@ -303,12 +304,6 @@ export default async function handler(
             "/" // Always revalidate homepage which lists events
         ];
         
-        // Add event page revalidation if slug exists and event is active
-        if (createdEvent?.slug && createdEvent.isActive) {
-            revalidationPaths.push(`/events/${createdEvent.slug}`);
-            console.log(`🔄 Added new event page revalidation: /events/${createdEvent.slug}`);
-        }
-        
         console.log(`🔄 Revalidation paths:`, revalidationPaths);
         try {
             await revalidateBuild(res, revalidationPaths);
@@ -318,7 +313,13 @@ export default async function handler(
             // Don't fail the request, but log the error clearly
             // The page will still be regenerated on next ISR cycle
         }
-        
+
+        await requestMainSiteEventRevalidation({
+            action: "event_created",
+            eventId,
+            slug: createdEvent?.slug ?? undefined,
+        });
+
         // Track event creation for analytics
         console.log(`[analytics/admin_action] ${JSON.stringify({
             action_type: 'create_event',

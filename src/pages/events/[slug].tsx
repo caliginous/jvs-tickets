@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import Image from 'next/image';
@@ -14,6 +15,8 @@ import { Options } from '../../constants/Constants';
 import { computeAvailability } from '../../lib/services/ticketing/availability';
 
 function WaitlistJoinForm({ eventDateId, ticketTypes }: { eventDateId: number; ticketTypes: any[] }) {
+  const turnstileSiteKey = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '').trim();
+  const turnstileEnabled = !!turnstileSiteKey;
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -22,9 +25,15 @@ function WaitlistJoinForm({ eventDateId, ticketTypes }: { eventDateId: number; t
   const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ success?: boolean; message?: string; error?: string } | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const turnstileRef = useRef<any>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (turnstileEnabled && !turnstileToken) {
+      setResult({ error: 'Please complete the security verification.' });
+      return;
+    }
     setSubmitting(true);
     setResult(null);
 
@@ -40,14 +49,23 @@ function WaitlistJoinForm({ eventDateId, ticketTypes }: { eventDateId: number; t
           lastName: lastName.trim() || undefined,
           phone: phone.trim() || undefined,
           quantity,
+          ...(turnstileEnabled ? { turnstileToken } : {}),
         }),
       });
 
       const data = await resp.json();
       if (resp.ok) {
         setResult({ success: true, message: data.message || 'You have been added to the waitlist!' });
+        if (turnstileRef.current) {
+          turnstileRef.current.reset();
+        }
+        setTurnstileToken('');
       } else {
         setResult({ error: data.error || 'Something went wrong. Please try again.' });
+        if (turnstileRef.current) {
+          turnstileRef.current.reset();
+        }
+        setTurnstileToken('');
       }
     } catch {
       setResult({ error: 'Network error. Please try again.' });
@@ -114,7 +132,19 @@ function WaitlistJoinForm({ eventDateId, ticketTypes }: { eventDateId: number; t
           </select>
         </div>
 
-        <button type="submit" disabled={submitting || !email.trim()}
+        {turnstileEnabled && (
+          <div className="flex justify-center pt-1">
+            <Turnstile
+              ref={turnstileRef}
+              siteKey={turnstileSiteKey}
+              onSuccess={(token: string) => setTurnstileToken(token)}
+              onError={() => setTurnstileToken('')}
+              options={{ theme: 'light', size: 'normal' }}
+            />
+          </div>
+        )}
+
+        <button type="submit" disabled={submitting || !email.trim() || (turnstileEnabled && !turnstileToken)}
           className="w-full py-2.5 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors text-sm">
           {submitting ? 'Joining...' : 'Join Waitlist'}
         </button>

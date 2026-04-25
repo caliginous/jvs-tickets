@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { showToast } from "../../../ui";
 import { Dialog, Button, Input, Select, Switch, Textarea } from "../../../ui";
 import { Listbox } from '@headlessui/react';
@@ -10,7 +11,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { arrayEquals, formatPrice } from "../../../constants/util";
 import dynamic from 'next/dynamic';
 
-import { PhotographIcon, CalendarIcon, ClockIcon, GlobeAltIcon, TrashIcon } from '@heroicons/react/solid';
+import { PhotographIcon, CalendarIcon, ClockIcon, GlobeAltIcon, TrashIcon, ClipboardListIcon } from '@heroicons/react/solid';
 import Image from "next/image";
 
 import { ManageEventSchema, type ManageEventValues, defaultManageEventValues } from "./ManageEventDialog.schema";
@@ -446,9 +447,22 @@ export const ManageEventDialog = ({
                 static={customFieldsOpen || deleteOpen || openPreview}
             >
                 <Dialog.Header onClose={onClose}>
-                    <h3 className="text-lg font-semibold">
-                        {event ? "Edit Event" : "Add Event"}
-                    </h3>
+                    <div className="flex flex-wrap items-center justify-between gap-3 w-full pr-2">
+                        <h3 className="text-lg font-semibold">
+                            {event ? "Edit Event" : "Add Event"}
+                        </h3>
+                        {event?.id ? (
+                            <Link href={`/admin/events/${event.id}/waitlist`}>
+                                <span
+                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 cursor-pointer"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <ClipboardListIcon className="w-4 h-4" />
+                                    Waitlist
+                                </span>
+                            </Link>
+                        ) : null}
+                    </div>
                 </Dialog.Header>
                 <Dialog.Body>
                     <form 

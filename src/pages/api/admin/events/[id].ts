@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import {
     revalidateBuild,
+    requestMainSiteEventRevalidation,
     serverAuthenticate
 } from "../../../../constants/serverUtil";
 import prisma from "../../../../lib/prisma";
@@ -117,6 +118,11 @@ export default async function handler(
 
             console.log(`✅ Event ${eventId} deleted successfully`);
             await revalidateBuild(res, []);
+            await requestMainSiteEventRevalidation({
+                action: "event_deleted",
+                eventId,
+                slug: event.slug ?? undefined,
+            });
             res.status(200).end("Deleted");
             return;
         } catch (error) {
@@ -446,23 +452,14 @@ export default async function handler(
             });
             
             const revalidationPaths = [
-                `/booking/${id as string}`, 
+                `/booking/${id as string}`,
                 "/information",
                 "/" // Always revalidate homepage which lists events
             ];
             
-            // Add event page revalidation if slug exists and event is active
-            if (eventForRevalidation?.slug && eventForRevalidation.isActive) {
-                revalidationPaths.push(`/events/${eventForRevalidation.slug}`);
-                console.log(`🔄 Added event page revalidation: /events/${eventForRevalidation.slug}`);
-            }
-            
-            // If slug was changed, also revalidate the old slug path
-            if (originalEvent?.slug && originalEvent.slug !== eventForRevalidation?.slug) {
-                revalidationPaths.push(`/events/${originalEvent.slug}`);
-                console.log(`🔄 Added old event page revalidation: /events/${originalEvent.slug}`);
-            }
-            
+            // Tessera /events/[slug] is SSR (getServerSideProps); res.revalidate() cannot invalidate it.
+            // Marketing site ISR is triggered via MAIN_SITE_REVALIDATE_* (requestMainSiteEventRevalidation).
+
             console.log(`🔄 Revalidation paths:`, revalidationPaths);
             try {
                 await revalidateBuild(res, revalidationPaths);
@@ -472,7 +469,24 @@ export default async function handler(
                 // Don't fail the request, but log the error clearly
                 // The page will still be regenerated on next ISR cycle
             }
-            
+
+            const numericId = parseInt(id as string, 10);
+            await requestMainSiteEventRevalidation({
+                action: "event_updated",
+                eventId: numericId,
+                slug: eventForRevalidation?.slug ?? undefined,
+            });
+            if (
+                originalEvent?.slug &&
+                originalEvent.slug !== eventForRevalidation?.slug
+            ) {
+                await requestMainSiteEventRevalidation({
+                    action: "event_updated",
+                    eventId: numericId,
+                    slug: originalEvent.slug,
+                });
+            }
+
             const responseData = { 
                 message: "Event updated successfully", 
                 eventId: id,

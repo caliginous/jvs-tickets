@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import prisma from "../../../lib/prisma";
 import { computeAvailability } from "../../../lib/services/ticketing/availability";
+import { getTurnstileConfig, verifyTurnstileToken } from "../../../lib/turnstileVerify";
 
 const MAX_WAITLIST_QUANTITY = 10;
 
@@ -11,7 +12,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
-        const { eventDateId, eventTicketTypeId, email, firstName, lastName, phone, quantity } = req.body;
+        const turnstileCfg = getTurnstileConfig();
+        const siteKey = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "").trim();
+        const secret = (process.env.TURNSTILE_SECRET_KEY || "").trim();
+        if ((siteKey && !secret) || (!siteKey && secret)) {
+            console.error(
+                "[waitlist/join] Turnstile misconfigured: set both NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY"
+            );
+            return res.status(503).json({ error: "Waitlist is temporarily unavailable. Please try again later." });
+        }
+
+        const { eventDateId, eventTicketTypeId, email, firstName, lastName, phone, quantity, turnstileToken } = req.body;
+
+        if (turnstileCfg.enabled) {
+            if (!turnstileToken) {
+                return res.status(400).json({ error: "Please complete the security verification." });
+            }
+            const ok = await verifyTurnstileToken(turnstileToken, turnstileCfg.secret);
+            if (!ok) {
+                return res.status(400).json({ error: "Security verification failed. Please try again." });
+            }
+        }
 
         if (!eventDateId || !eventTicketTypeId || !email || !quantity) {
             return res.status(400).json({ error: "Missing required fields: eventDateId, eventTicketTypeId, email, quantity" });

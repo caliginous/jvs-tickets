@@ -4,10 +4,10 @@ import { computeAvailability } from '../ticketing/availability';
 
 const OFFER_DURATION_MINUTES = 120;
 
-// Stable advisory lock key derived from eventDateId.
-// pg_advisory_lock takes a bigint; we use the eventDateId directly
-// (prefixed with a namespace constant to avoid collisions with other locks).
-const LOCK_NAMESPACE = 834719; // arbitrary constant
+// Stable advisory lock key: Postgres exposes pg_advisory_lock(int, int) or
+// pg_advisory_lock(bigint) — not (bigint, bigint). Cast in SQL so parameters
+// are not inferred as bigint pairs.
+const LOCK_NAMESPACE = 834719; // arbitrary constant (fits int4)
 
 interface AllocationResult {
   offersCreated: number;
@@ -43,7 +43,7 @@ export async function allocateWaitlistOffers(params: {
   // This serialises concurrent allocation runs so two callers can't
   // both read the same availability snapshot and over-offer.
   await prisma.$executeRawUnsafe(
-    `SELECT pg_advisory_lock($1, $2)`,
+    `SELECT pg_advisory_lock($1::int, $2::int)`,
     LOCK_NAMESPACE,
     eventDateId
   );
@@ -52,7 +52,7 @@ export async function allocateWaitlistOffers(params: {
     return await runAllocation(params);
   } finally {
     await prisma.$executeRawUnsafe(
-      `SELECT pg_advisory_unlock($1, $2)`,
+      `SELECT pg_advisory_unlock($1::int, $2::int)`,
       LOCK_NAMESPACE,
       eventDateId
     );
