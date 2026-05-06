@@ -4,6 +4,26 @@ import { capacityConsumingStatusFilter } from '../../../../../../lib/services/ti
 import { serverAuthenticate, requestMainSiteEventRevalidation } from '../../../../../../constants/serverUtil';
 import { PermissionSection, PermissionType } from '../../../../../../constants/interfaces';
 
+async function authenticateTicketTypeAccess(
+    req: NextApiRequest,
+    res: NextApiResponse,
+    permissionType: PermissionType
+) {
+    // New installs can grant EventTicketTypes specifically, but production admin
+    // accounts historically only had EventManagement. Ticket types are part of
+    // event configuration, so allow either permission to avoid locking admins out.
+    const ticketTypeActor = await serverAuthenticate(req, res, {
+        permission: PermissionSection.EventTicketTypes,
+        permissionType,
+    }, false);
+    if (ticketTypeActor) return ticketTypeActor;
+
+    return serverAuthenticate(req, res, {
+        permission: PermissionSection.EventManagement,
+        permissionType,
+    });
+}
+
 async function nudgeMainSite(eventId: number) {
     try {
         const parent = await prisma.event.findUnique({
@@ -22,10 +42,7 @@ async function nudgeMainSite(eventId: number) {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     const requiredType = req.method === 'GET' ? PermissionType.Read : PermissionType.Write;
-    const actor = await serverAuthenticate(req, res, {
-        permission: PermissionSection.EventTicketTypes,
-        permissionType: requiredType
-    });
+    const actor = await authenticateTicketTypeAccess(req, res, requiredType);
     if (!actor) return;
 
     const { id: eventId, ticketTypeId } = req.query;
