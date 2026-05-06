@@ -12,7 +12,6 @@ import { arrayEquals, formatPrice } from "../../../constants/util";
 import dynamic from 'next/dynamic';
 
 import { PhotographIcon, CalendarIcon, ClockIcon, GlobeAltIcon, TrashIcon, ClipboardListIcon } from '@heroicons/react/solid';
-import Image from "next/image";
 
 import { ManageEventSchema, type ManageEventValues, defaultManageEventValues } from "./ManageEventDialog.schema";
 
@@ -46,6 +45,7 @@ export const ManageEventDialog = ({
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [eventToDelete, setEventToDelete] = useState<any>(null);
     const [coverImage, setCoverImage] = useState<File | null>(null);
+    const [persistedCoverImageUrl, setPersistedCoverImageUrl] = useState<string | null>(event?.coverImage ?? null);
     const [coverImageSize, setCoverImageSize] = useState<number | null>(null);
     const [removeCoverImage, setRemoveCoverImage] = useState(false);
 
@@ -253,7 +253,12 @@ export const ManageEventDialog = ({
             // Handle cover image if present (don't let this break the main flow)
             if (coverImage) {
                 try {
-                    await uploadCoverImage(eventId);
+                    const uploadedUrl = await uploadCoverImage(eventId);
+                    if (uploadedUrl) {
+                        setPersistedCoverImageUrl(uploadedUrl);
+                        setCoverImage(null);
+                        setRemoveCoverImage(false);
+                    }
                 } catch (imageError: any) {
 
                     showToast.error("Event created successfully, but cover image upload failed");
@@ -285,21 +290,23 @@ export const ManageEventDialog = ({
         }
     };
 
-    const uploadCoverImage = async (eventId: string) => {
-        if (!coverImage) return;
+    const uploadCoverImage = async (eventId: string): Promise<string | null> => {
+        if (!coverImage) return null;
 
         const formData = new FormData();
         formData.append('coverImage', coverImage);
 
         try {
-            await axios.post(`/api/admin/events/coverimage?eventId=${eventId}`, formData, {
+            const response = await axios.post(`/api/admin/events/coverimage?eventId=${eventId}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
                 withCredentials: true
             });
             showToast.success("Cover image uploaded successfully!");
+            return response.data?.url ?? null;
         } catch (error: any) {
 
             showToast.error("Failed to upload cover image");
+            throw error;
         }
     };
 
@@ -364,6 +371,7 @@ export const ManageEventDialog = ({
 
     const handleRemoveCoverImage = () => {
         setCoverImage(null);
+        setPersistedCoverImageUrl(null);
         setRemoveCoverImage(true);
         setCoverImageSize(null);
     };
@@ -412,6 +420,7 @@ export const ManageEventDialog = ({
             setValue("ticketSaleEndDate", event.dates?.[0]?.ticketSaleEndDate ? new Date(event.dates[0].ticketSaleEndDate).toISOString().slice(0, 16) : undefined);
             // Don't reset ticketTypesChanged here - only reset it when actually switching to a different event
             setCoverImageSize(event.coverImageSize);
+            setPersistedCoverImageUrl(event.coverImage ?? null);
             setCoverImage(null);  // Reset cover image when switching events to prevent accidental uploads
             setRemoveCoverImage(false);
             
@@ -422,12 +431,24 @@ export const ManageEventDialog = ({
             } else {
             reset();
             setCoverImageSize(null);
+            setPersistedCoverImageUrl(null);
             setCoverImage(null);  // Reset cover image when creating new event
             setRemoveCoverImage(false);
         }
     }, [event, setValue, reset, form]);
 
-    const coverImageUrl = !removeCoverImage && (coverImage ? URL.createObjectURL(coverImage) : event?.coverImage);
+    const coverImagePreviewUrl = useMemo(() => {
+        if (!coverImage) return null;
+        return URL.createObjectURL(coverImage);
+    }, [coverImage]);
+
+    useEffect(() => {
+        return () => {
+            if (coverImagePreviewUrl) URL.revokeObjectURL(coverImagePreviewUrl);
+        };
+    }, [coverImagePreviewUrl]);
+
+    const coverImageUrl = !removeCoverImage && (coverImagePreviewUrl || persistedCoverImageUrl);
 
     // Prevent parent dialog from closing when child dialogs are open
     const handleClose = () => {
@@ -775,13 +796,12 @@ export const ManageEventDialog = ({
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                     {coverImageUrl && (
                                         <div className="h-32 relative">
-                                            <Image 
+                                            {/* Use a plain img here so both local object URLs and Vercel Blob URLs
+                                                preview immediately without going through Next's image loader. */}
+                                            <img
                                                 src={coverImageUrl} 
                                                 alt="Event Preview" 
-                                                width={128}
-                                                height={128}
                                                 className="object-contain w-full h-full"
-                                                unoptimized={coverImageUrl?.includes('blob.vercel-storage.com')}
                                             />
                                         </div>
                                     )}

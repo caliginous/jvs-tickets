@@ -13,6 +13,12 @@ module.exports = nextTranslate({
     },
     images: {
         domains: ['htoosyxcavvsuyjz.public.blob.vercel-storage.com'],
+        remotePatterns: [
+            {
+                protocol: 'https',
+                hostname: '**.blob.vercel-storage.com',
+            },
+        ],
         formats: ['image/webp', 'image/avif'],
     },
     webpack: function (config, { dev, isServer }) {
