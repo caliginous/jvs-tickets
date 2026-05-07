@@ -171,7 +171,7 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
   return (
     <div className="space-y-8">
       {/* Order Summary Box */}
-      <div className="bg-neutral-50 rounded-lg p-6 border border-neutral-200">
+      <div className="bg-neutral-50 rounded-lg p-4 sm:p-6 border border-neutral-200 min-w-0">
         <h3 className="text-lg font-semibold text-neutral-900 mb-4">Order Summary</h3>
         <div className="space-y-3">
           {/* Tickets */}
@@ -359,35 +359,37 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
           eventDate={eventDate || new Date().toISOString()}
           discountInfo={discountInfo}
           claimSessionToken={claimSessionToken}
+          canProceed={canProceed}
+          disabledReason="You must accept the terms and conditions to proceed with payment"
         />
       </div>
 
       {/* Trust Signals */}
-      <div className="bg-white border border-neutral-200 rounded-lg p-6">
+      <div className="bg-white border border-neutral-200 rounded-lg p-4 sm:p-6 min-w-0 overflow-hidden">
         <h4 className="text-lg font-semibold text-neutral-900 mb-4">Secure Payment</h4>
         
         {/* Payment Icons */}
-        <div className="flex items-center space-x-4 mb-4">
-          <div className="flex items-center space-x-2">
-            <svg className="w-8 h-8 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
+        <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4 mb-4">
+          <div className="flex items-center min-w-0 gap-2">
+            <svg className="w-6 h-6 shrink-0 text-neutral-500" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
             </svg>
             <span className="text-sm font-medium text-neutral-700">Visa</span>
           </div>
-          <div className="flex items-center space-x-2">
-            <svg className="w-8 h-8 text-red-600" viewBox="0 0 24 24" fill="currentColor">
+          <div className="flex items-center min-w-0 gap-2">
+            <svg className="w-6 h-6 shrink-0 text-neutral-500" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
             </svg>
             <span className="text-sm font-medium text-neutral-700">Mastercard</span>
           </div>
-          <div className="flex items-center space-x-2">
-            <svg className="w-8 h-8 text-green-600" viewBox="0 0 24 24" fill="currentColor">
+          <div className="flex items-center min-w-0 gap-2">
+            <svg className="w-6 h-6 shrink-0 text-neutral-500" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
             </svg>
-            <span className="text-sm font-medium text-neutral-700">American Express</span>
+            <span className="text-sm font-medium text-neutral-700 leading-tight break-words">American Express</span>
           </div>
-          <div className="flex items-center space-x-2">
-            <svg className="w-8 h-8 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+          <div className="flex items-center min-w-0 gap-2">
+            <svg className="w-6 h-6 shrink-0 text-neutral-500" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
             </svg>
             <span className="text-sm font-medium text-neutral-700">PayPal</span>
@@ -395,20 +397,20 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
         </div>
         
         {/* Security Badges */}
-        <div className="flex items-center space-x-6">
-          <div className="flex items-center space-x-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="flex items-center min-w-0 gap-2">
             <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
             </svg>
             <span className="text-sm text-neutral-700">256-bit SSL Encryption</span>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center min-w-0 gap-2">
             <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             <span className="text-sm text-neutral-700">PCI DSS Compliant</span>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center min-w-0 gap-2">
             <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>

@@ -1,6 +1,5 @@
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
-import { retrieveCheckoutSession } from '../../lib/stripe';
 import Navbar from '../../components/booking/Navbar';
 import Footer from '../../components/booking/Footer';
 
@@ -66,7 +65,11 @@ export default function CheckoutSuccess() {
             <div className="text-green-500 text-7xl mb-6">✅</div>
             <h1 className="text-3xl font-bold text-gray-900 mb-4">Payment Successful!</h1>
             <p className="text-gray-700 mb-4 text-lg">Thank you for your purchase. Your tickets have been confirmed.</p>
-            <p className="text-sm text-gray-500 mb-6">Session ID: {session_id}</p>
+            {session_id && (
+              <p className="text-sm text-gray-500 mb-6 break-all">
+                Session ID: {Array.isArray(session_id) ? session_id[0] : session_id}
+              </p>
+            )}
             <p className="text-sm text-gray-500 mb-8">You will receive a confirmation email shortly. Your order is being processed.</p>
             <button
               onClick={() => router.push('/')}

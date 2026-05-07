@@ -9,9 +9,20 @@ interface StripeCardFormProps {
   eventDate: string;
   discountInfo?: any;
   claimSessionToken?: string | null;
+  canProceed?: boolean;
+  disabledReason?: string;
 }
 
-export default function StripeCardForm({ onSuccess, eventDateId, eventName, eventDate, discountInfo, claimSessionToken }: StripeCardFormProps) {
+export default function StripeCardForm({
+  onSuccess,
+  eventDateId,
+  eventName,
+  eventDate,
+  discountInfo,
+  claimSessionToken,
+  canProceed = true,
+  disabledReason,
+}: StripeCardFormProps) {
   const dispatch = useAppDispatch();
   const order = useAppSelector((state) => state.order);
   const personalInfo = useAppSelector((state) => state.personalInformation);
@@ -19,6 +30,11 @@ export default function StripeCardForm({ onSuccess, eventDateId, eventName, even
   const [error, setError] = useState<string | null>(null);
 
   const handleStripeCheckout = async () => {
+    if (!canProceed) {
+      setError(disabledReason || 'Please complete all required steps before proceeding');
+      return;
+    }
+
     if (!order.tickets || order.tickets.length === 0) {
       setError('No tickets selected');
       return;
@@ -179,7 +195,7 @@ export default function StripeCardForm({ onSuccess, eventDateId, eventName, even
 
       <button
         onClick={handleStripeCheckout}
-        disabled={isLoading || !order.tickets || order.tickets.length === 0}
+        disabled={isLoading || !canProceed || !order.tickets || order.tickets.length === 0}
         className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
       >
         {isLoading ? (
