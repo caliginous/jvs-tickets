@@ -105,7 +105,14 @@ export const PaymentSection: React.FC<PaymentSectionProps> = ({
           }
         }
       } else {
-        setDiscountError('Failed to validate discount code');
+        let message = 'Failed to validate discount code';
+        try {
+          const data = await response.json();
+          message = data?.error || data?.message || message;
+        } catch {
+          // keep generic message
+        }
+        setDiscountError(message);
         setDiscountInfo(null);
         // Notify parent component that discount was removed
         if (onDiscountChange) {

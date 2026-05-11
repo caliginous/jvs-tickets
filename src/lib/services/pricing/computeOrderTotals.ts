@@ -52,6 +52,11 @@ export class PricingError extends Error {
     }
 }
 
+const poundsToPence = (value: number | null | undefined): number | null => {
+    if (value === null || value === undefined) return null;
+    return Math.round(Number(value) * 100);
+};
+
 /**
  * Trusted server-side pricing: never trusts any monetary field from the client.
  * Prices are always loaded from the DB.
@@ -139,7 +144,8 @@ export async function computeOrderTotals(
             throw new PricingError("Discount code has expired");
         if (dc.usageLimit && dc.currentUsage >= dc.usageLimit)
             throw new PricingError("Discount code usage limit reached");
-        if (dc.minimumOrderValue && originalTotal < dc.minimumOrderValue)
+        const minimumOrderValuePence = poundsToPence(dc.minimumOrderValue);
+        if (minimumOrderValuePence !== null && originalTotal < minimumOrderValuePence)
             throw new PricingError(
                 `Minimum order value of ${dc.minimumOrderValue} required`
             );
@@ -157,11 +163,14 @@ export async function computeOrderTotals(
 
         if (dc.discountType === "percentage") {
             discountAmount = Math.floor((originalTotal * dc.discountValue) / 100);
-            if (dc.maximumDiscount && discountAmount > dc.maximumDiscount) {
-                discountAmount = dc.maximumDiscount;
+            const maximumDiscountPence = poundsToPence(dc.maximumDiscount);
+            if (maximumDiscountPence !== null && discountAmount > maximumDiscountPence) {
+                discountAmount = maximumDiscountPence;
             }
         } else {
-            discountAmount = dc.discountValue;
+            // Fixed discount values are configured in pounds in the admin UI; order
+            // totals and EventTicketType.price are stored in pence.
+            discountAmount = poundsToPence(dc.discountValue) ?? 0;
         }
         if (discountAmount > originalTotal) discountAmount = originalTotal;
 
