@@ -5,6 +5,7 @@ import { checkCapacityForOrder } from '../../../lib/services/ticketing/availabil
 import { validateClaimSession, createOrderWithWaitlistFulfilment } from '../../../lib/services/waitlist/claimSessionValidator';
 import { computeOrderTotals, PricingError, type TrustedTicketLine } from '../../../lib/services/pricing/computeOrderTotals';
 import { reserveOrderAtomically } from '../../../lib/services/ticketing/reserveAtomic';
+import { serializeOrderCustomFields } from '../../../lib/newsletterOptIn';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -236,7 +237,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       finalTotal: finalTotalInPence,
       discountAmount: discountInPence,
       discountCodeId: pricing.appliedDiscount?.id ?? null,
-      customFields: customerData?.customFields ? JSON.stringify(customerData.customFields) : null,
+      customFields: serializeOrderCustomFields(customerData?.customFields, {
+        subscribeNewsletter: customerData?.subscribeNewsletter,
+        subscribeEvents: customerData?.subscribeEvents,
+      }),
     };
 
     if (claimSessionValidation?.valid) {

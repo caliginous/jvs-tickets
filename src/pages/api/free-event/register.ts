@@ -4,6 +4,8 @@ import { send } from '../../../lib/send';
 import { checkCapacityForOrder } from '../../../lib/services/ticketing/availability';
 import { validateClaimSession } from '../../../lib/services/waitlist/claimSessionValidator';
 import { computeOrderTotals, PricingError } from '../../../lib/services/pricing/computeOrderTotals';
+import { serializeOrderCustomFields } from '../../../lib/newsletterOptIn';
+import { subscribeConfirmedOrderToMailingLists } from '../../../lib/services/newsletterSubscriptionService';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'POST') {
@@ -204,7 +206,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                         finalTotal: 0,
                         idempotencyKey: orderId,
                         cancellationSecret,
-                        customFields: customerData.customFields ? JSON.stringify(customerData.customFields) : null,
+                        customFields: serializeOrderCustomFields(customerData.customFields, {
+                            subscribeNewsletter: customerData.subscribeNewsletter,
+                            subscribeEvents: customerData.subscribeEvents,
+                        }),
                     }
                 });
 
@@ -272,7 +277,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     finalTotal: 0,
                     idempotencyKey: orderId,
                     cancellationSecret,
-                    customFields: customerData.customFields ? JSON.stringify(customerData.customFields) : null,
+                    customFields: serializeOrderCustomFields(customerData.customFields, {
+                        subscribeNewsletter: customerData.subscribeNewsletter,
+                        subscribeEvents: customerData.subscribeEvents,
+                    }),
                 }
             });
 
@@ -293,6 +301,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
             console.log(`✅ Created ${createdTickets.length} free tickets for order ${order.id}`);
         }
+
+        // Mailing-list consent is acted on only after the order is confirmed.
+        await subscribeConfirmedOrderToMailingLists(order.id);
 
         // Send confirmation email using modern email system
         try {

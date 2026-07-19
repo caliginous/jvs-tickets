@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { selectPersonalInformation, setFirstName, setLastName, setEmail, setPhone, setZip, setCustomFields } from '../../store/reducers/personalInformationReducer';
+import {
+  selectPersonalInformation,
+  setFirstName,
+  setLastName,
+  setEmail,
+  setPhone,
+  setCustomFields,
+  setSubscribeNewsletter,
+  setSubscribeEvents
+} from '../../store/reducers/personalInformationReducer';
 import { CustomFields } from '../form/CustomFields';
 import { CustomFieldValidator } from '../../types/customFields';
 
@@ -316,6 +325,40 @@ export const PersonalDetails: React.FC<PersonalDetailsProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Optional email subscriptions */}
+      <fieldset className="space-y-4 rounded-lg border border-neutral-200 bg-white p-5">
+        <legend className="px-1 text-lg font-semibold text-neutral-900">Keep in touch with JVS</legend>
+        <p className="text-sm text-neutral-600">
+          Optional. Choose either or both. After your booking is complete, we&apos;ll email you to confirm your subscription.
+        </p>
+
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={personalInfo.subscribeNewsletter}
+            onChange={(event) => dispatch(setSubscribeNewsletter(event.target.checked))}
+            className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span>
+            <span className="block text-sm font-medium text-neutral-900">JVS newsletter</span>
+            <span className="block text-sm text-neutral-600">Receive our newsletter (2–3 issues a month).</span>
+          </span>
+        </label>
+
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={personalInfo.subscribeEvents}
+            onChange={(event) => dispatch(setSubscribeEvents(event.target.checked))}
+            className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span>
+            <span className="block text-sm font-medium text-neutral-900">Event emails</span>
+            <span className="block text-sm text-neutral-600">Hear about upcoming JVS events and ticket releases.</span>
+          </span>
+        </label>
+      </fieldset>
 
       {/* Custom Fields Section */}
       {event?.customFields && event.customFields.length > 0 && (

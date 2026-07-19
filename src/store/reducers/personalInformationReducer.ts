@@ -14,6 +14,8 @@ export interface PersonalInformationState {
     address: IAddress;
     email: string;
     phone: string;
+    subscribeNewsletter: boolean;
+    subscribeEvents: boolean;
     shipping: IShipping;
     userId?: string;
     customFields: Record<string, string>;
@@ -39,6 +41,8 @@ const initialState: PersonalInformationState = {
     serverCustomFields: [],
     email: "",
     phone: "",
+    subscribeNewsletter: false,
+    subscribeEvents: false,
     shipping: null,
     userId: null
 };
@@ -61,6 +65,12 @@ export const personalInformationSlice = createSlice({
         },
         setPhone: (state, action: PayloadAction<string>) => {
             state.phone = action.payload;
+        },
+        setSubscribeNewsletter: (state, action: PayloadAction<boolean>) => {
+            state.subscribeNewsletter = action.payload;
+        },
+        setSubscribeEvents: (state, action: PayloadAction<boolean>) => {
+            state.subscribeEvents = action.payload;
         },
         setAddressAddress: (state, action: PayloadAction<string>) => {
             state.address.address = action.payload;
@@ -98,6 +108,8 @@ export const {
     setLastName,
     setEmail,
     setPhone,
+    setSubscribeNewsletter,
+    setSubscribeEvents,
     setAddress,
     setAddressAddress,
     setZip,

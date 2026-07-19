@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import prisma from "../../../lib/prisma";
 import { send } from "../../../lib/send";
 import { parseAmountFromMetadata, validatePenceAmount } from "../../../lib/amountUtils";
+import { subscribeConfirmedOrderToMailingLists } from "../../../lib/services/newsletterSubscriptionService";
 
 /**
  * Stripe Webhook Handler
@@ -323,6 +324,9 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
                     });
                     
                     console.log(`[webhook/stripe] ✅ Order ${order.id} updated successfully to PAID status`);
+
+                    // Mailing-list consent is acted on only after payment succeeds.
+                    await subscribeConfirmedOrderToMailingLists(order.id);
                     
                     // Track successful purchase for analytics
                     try {

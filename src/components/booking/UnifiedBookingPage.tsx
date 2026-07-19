@@ -169,7 +169,9 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
           city: personalInfo.address?.city || '',
           countryCode: personalInfo.address?.country?.countryShortCode || 'GB',
           regionCode: personalInfo.address?.region?.shortCode || '',
-          customFields: personalInfo.customFields || {}
+          customFields: personalInfo.customFields || {},
+          subscribeNewsletter: personalInfo.subscribeNewsletter,
+          subscribeEvents: personalInfo.subscribeEvents
         }
       };
 

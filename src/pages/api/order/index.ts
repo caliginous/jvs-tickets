@@ -53,6 +53,8 @@ export default async function handler(
             },
             email: order.user.email,
             phone: order.user.phone || '',
+            subscribeNewsletter: false,
+            subscribeEvents: false,
             userId: order.user.id,
             shipping: JSON.parse(order.shipping) as IShipping,
             customFields: JSON.parse(order.user.customFields),
