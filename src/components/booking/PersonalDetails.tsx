@@ -66,8 +66,9 @@ export const PersonalDetails: React.FC<PersonalDetailsProps> = ({
     }
     
     if (name === 'phone') {
-      const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-      if (!phoneRegex.test(value.replace(/\s/g, ''))) {
+      const normalizedPhone = value.replace(/[\s()-]/g, '');
+      const phoneRegex = /^(?:\+[1-9]\d{6,14}|\d{7,16})$/;
+      if (!phoneRegex.test(normalizedPhone)) {
         return 'Please enter a valid phone number';
       }
     }
