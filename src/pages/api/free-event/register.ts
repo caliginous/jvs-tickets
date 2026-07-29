@@ -27,8 +27,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(400).json({ error: 'Event date and customer email are required' });
         }
 
-        if (!customerData || !customerData.firstName || !customerData.lastName) {
-            return res.status(400).json({ error: 'Customer data incomplete' });
+        if (
+            !customerData ||
+            !customerData.firstName ||
+            !customerData.lastName ||
+            typeof customerData.phone !== 'string' ||
+            !customerData.phone.trim()
+        ) {
+            return res.status(400).json({ error: 'First name, last name, and phone number are required' });
         }
 
         const eventDateIdParsed = parseInt(eventDateId);

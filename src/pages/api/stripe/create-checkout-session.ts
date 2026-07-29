@@ -33,10 +33,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Validate customer data if provided
-    if (customerData && (!customerData.firstName || !customerData.lastName)) {
+    // Customer identity and phone are required for all ticket purchases.
+    if (
+      !customerData ||
+      !customerData.firstName ||
+      !customerData.lastName ||
+      typeof customerData.phone !== 'string' ||
+      !customerData.phone.trim()
+    ) {
       console.error('❌ Validation failed: Customer data incomplete');
-      return res.status(400).json({ error: 'Customer data incomplete' });
+      return res.status(400).json({ error: 'First name, last name, and phone number are required' });
     }
 
     // Normalise ticket input. Accept both ticketTypeId and categoryId; ignore client price/name.

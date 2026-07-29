@@ -57,6 +57,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(404).json({ message: 'Event not found' });
         }
 
+        const reportOrders = event.dates.flatMap(eventDate =>
+            eventDate.orders.filter(orderConsumesCapacity)
+        );
+        const attendeeUserIds = Array.from(new Set(reportOrders.map(order => order.userId)));
+
+        // Find each attendee's earliest qualifying booking across all events in one
+        // batched query. This avoids an N+1 query for every report row.
+        const firstBookings = attendeeUserIds.length > 0
+            ? await prisma.order.groupBy({
+                by: ['userId'],
+                where: {
+                    userId: { in: attendeeUserIds },
+                    OR: capacityConsumingStatusFilter(),
+                },
+                _min: { date: true },
+            })
+            : [];
+        const firstBookingDateByUser = new Map(
+            firstBookings.map(booking => [booking.userId, booking._min.date?.getTime()])
+        );
+
         const orders = [];
         
         for (const eventDate of event.dates) {
@@ -84,6 +105,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     total: orderTotal,
                     status: order.status,
                     inventoryStatus: isHeldCapacity ? 'HELD' : 'ACTIVE',
+                    isFirstTimeBooker: firstBookingDateByUser.get(order.userId) === order.date.getTime(),
                     arrived: false,
                     customFields: order.customFields
                 });

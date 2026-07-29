@@ -255,8 +255,8 @@ export const UnifiedBookingPage: React.FC<UnifiedBookingPageProps> = ({
           isComplete = order.tickets.length > 0;
           break;
         case 'personal':
-          isValid = !!(personalInfo.email && personalInfo.address?.firstName && personalInfo.address?.lastName);
-          isComplete = !!(personalInfo.email && personalInfo.address?.firstName && personalInfo.address?.lastName);
+          isValid = !!(personalInfo.email && personalInfo.phone && personalInfo.address?.firstName && personalInfo.address?.lastName);
+          isComplete = !!(personalInfo.email && personalInfo.phone && personalInfo.address?.firstName && personalInfo.address?.lastName);
           
           // Personal section validation (no logging to prevent spam)
           break;

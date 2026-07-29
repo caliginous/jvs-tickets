@@ -47,6 +47,7 @@ interface Order {
     finalTotal?: number;
     originalTotal?: number;
     arrived?: boolean;
+    isFirstTimeBooker: boolean;
     customFields?: string; // JSON string of custom field responses
 }
 
@@ -281,7 +282,7 @@ export default function ReportsPage() {
         setIsExporting(true);
         try {
             // Prepare CSV headers
-            const headers = ['Order ID', 'Customer', 'Email', 'Phone', 'Ticket Type', 'Quantity', 'Total'];
+            const headers = ['Order ID', 'Customer', 'First-time Booker', 'Email', 'Phone', 'Ticket Type', 'Quantity', 'Total'];
             
             // Add custom field headers if event has custom fields
             if (event.customFields && event.customFields.length > 0) {
@@ -297,6 +298,7 @@ export default function ReportsPage() {
                 const row: string[] = [
                     `"${order.id}"`,
                     `"${order.customerName}"`,
+                    order.isFirstTimeBooker ? 'Yes' : 'No',
                     `"${order.email}"`,
                     `"${order.phone || ''}"`,
                     `"${order.ticketType}"`,
@@ -398,6 +400,7 @@ export default function ReportsPage() {
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Booking History</th>
                                 <th>Number of Tickets</th>
                                 <th>Arrived</th>
                             </tr>
@@ -408,6 +411,7 @@ export default function ReportsPage() {
                                 .map(order => `
                                 <tr>
                                     <td>${order.customerName}</td>
+                                    <td>${order.isFirstTimeBooker ? 'First time' : 'Returning'}</td>
                                     <td>${order.quantity}</td>
                                     <td><input type="checkbox" class="checkbox" /></td>
                                 </tr>
@@ -906,6 +910,7 @@ export default function ReportsPage() {
                                             <tr>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Booking History</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ticket Type</th>
@@ -922,6 +927,15 @@ export default function ReportsPage() {
                                                 <tr key={order.id} className="hover:bg-gray-50">
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{order.id}</td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.customerName}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                                                            order.isFirstTimeBooker
+                                                                ? 'bg-green-100 text-green-800'
+                                                                : 'bg-gray-100 text-gray-700'
+                                                        }`}>
+                                                            {order.isFirstTimeBooker ? 'First time' : 'Returning'}
+                                                        </span>
+                                                    </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.email}</td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.phone}</td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.ticketType}</td>

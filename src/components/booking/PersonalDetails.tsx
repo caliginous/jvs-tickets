@@ -142,7 +142,7 @@ export const PersonalDetails: React.FC<PersonalDetailsProps> = ({
     const newErrors: Record<string, string> = {};
     
     // Only validate required fields
-    const requiredFields = ['firstName', 'lastName', 'email'];
+    const requiredFields = ['firstName', 'lastName', 'email', 'phone'];
     
     requiredFields.forEach(fieldName => {
       const value = formData[fieldName as keyof typeof formData];
@@ -170,6 +170,7 @@ export const PersonalDetails: React.FC<PersonalDetailsProps> = ({
     formData.firstName.trim() !== '' && 
     formData.lastName.trim() !== '' && 
     formData.email.trim() !== '' &&
+    formData.phone.trim() !== '' &&
     customFieldsValid;
 
   return (
@@ -295,16 +296,17 @@ export const PersonalDetails: React.FC<PersonalDetailsProps> = ({
           {/* Phone */}
           <div className="md:col-span-2">
             <label htmlFor="phone" className="block text-sm font-medium text-neutral-700 mb-2">
-              Phone Number
+              Phone Number *
             </label>
             <input
               type="tel"
               id="phone"
               name="phone"
+              required
               defaultValue={formData.phone}
               onChange={handleInputChange}
               onBlur={handleBlur}
-              placeholder="Enter your phone number (optional)"
+              placeholder="Enter your phone number"
               className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-black transition-colors ${
                 touched.phone && errors.phone 
                   ? 'border-red-300 focus:ring-red-500' 
@@ -320,7 +322,7 @@ export const PersonalDetails: React.FC<PersonalDetailsProps> = ({
               </p>
             )}
             <p className="mt-1 text-xs text-neutral-500">
-              Optional - for urgent booking updates only
+              For urgent booking updates only
             </p>
           </div>
         </div>
